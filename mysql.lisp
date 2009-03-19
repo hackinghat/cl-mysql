@@ -164,6 +164,36 @@
 (defcfun ("mysql_fetch_fields" mysql-fetch-fields) :pointer
   (mysql-res :pointer))
 
+(defun query (database query)
+  (let* ((query-return (mysql-query database query))
+	 (query-result (mysql-store-result database))
+	 (num-fields (1- (mysql-num-fields query-result)))
+	 (fields (mysql-fetch-fields query-result))
+	 (field-names (loop for i from 0 to num-fields
+		    collect (let ((mref (mem-aref fields 'mysql-field i)))
+			      (cons
+			       (foreign-slot-value mref 'mysql-field 'name)
+			       (foreign-enum-keyword
+				'enum-field-types
+				(foreign-slot-value mref 'mysql-field 'type))))))
+	 (data (do ((row (mysql-fetch-row query-result)
+			 (mysql-fetch-row query-result))
+		    (result nil (cons (mem-ref row :string) result)))
+		   ((null-pointer-p row) result))))
+    (mysql-free-result query-result)
+    (values data field-names)))
+
+(defun connect (&key host user password database port socket client-flag)
+  (let* ((mysql (mysql-init (null-pointer))))
+    (mysql-real-connect mysql
+			(or host "localhost")
+			(or user (null-pointer))
+			(or password (null-pointer))
+			(or database (null-pointer))
+			(or port 0)
+			(or socket (null-pointer))
+			(or client-flag 0))
+    (values mysql)))
 
 ;(defparameter *m* (mysql-init (null-pointer)))
 ;(mysql-real-connect *m* "localhost" "stkni" (null-pointer) "dpbsdk" 0 (null-pointer) 0)
