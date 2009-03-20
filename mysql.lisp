@@ -144,7 +144,25 @@
 (defcfun ("mysql_num_rows" mysql-num-rows) :unsigned-long-long
   (mysql-res :pointer))
 
+(defcfun ("mysql_list_dbs" mysql-list-dbs) :pointer
+  "http://dev.mysql.com/doc/refman/5.0/en/mysql-list-dbs.html"
+  (mysql :pointer)
+  (wild :string))
 
+(defcfun ("mysql_list_tables" mysql-list-tables) :pointer
+  "http://dev.mysql.com/doc/refman/5.0/en/mysql-list-dbs.html"
+  (mysql :pointer)
+  (wild :string))
+
+(defcfun ("mysql_list_fields" mysql-list-fields) :pointer
+  "http://dev.mysql.com/doc/refman/5.0/en/mysql-list-fields.html"
+  (mysql :pointer)
+  (table :string)
+  (wild :string))
+
+(defcfun ("mysql_list_processes" mysql-list-processes) :pointer
+  "http://dev.mysql.com/doc/refman/5.0/en/mysql-list-processes.html"
+  (mysql :pointer))
 
 (defcfun ("mysql_fetch_row" mysql-fetch-row) :pointer
   (mysql-res :pointer))
@@ -235,13 +253,23 @@
      (if (not (eq 0 return-value))
 	 (error (format nil "MySQL error: \"~A\" (errno = ~D)."
 			(mysql-error ,database)
-			(mysql-errno ,database))))))
+			(mysql-errno ,database)))
+	 return-value)))
+
+(defmacro error-if-null (database &body command)
+  `(let ((return-value ,@command))
+     (if (null-pointer-p return-value)
+	 (error (format nil "MySQL error: \"~A\" (errno = ~D)."
+			(mysql-error ,database)
+			(mysql-errno ,database)))
+	 return-value)))
+
 
 (defun use (database name)
   "Equivalent to \"USE <name>\""
   (error-if-non-zero database (mysql-select-db database name)))
 
-(defun query (database query)
+(defun query (database query &optional callback)
   (error-if-non-zero database (mysql-query database query))
   (loop for result-set = (mysql-store-result database)
        collect (process-result-set database result-set)
@@ -283,6 +311,22 @@
 
 (defun server-version (database)
   (decode-version (mysql-get-server-version database)))
+
+(defun list-dbs (database)
+  (let ((result (error-if-null database (mysql-list-dbs database (null-pointer)))))
+    (process-result-set database result)))
+
+(defun list-tables (database)
+  (let ((result (error-if-null database (mysql-list-tables database (null-pointer)))))
+    (process-result-set database result)))
+
+(defun list-fields (database table)
+  (let ((result (error-if-null database (mysql-list-fields database table (null-pointer)))))
+    (process-result-set database result)))
+
+(defun list-processes (database)
+  (let ((result (error-if-null database (mysql-list-processes database))))
+    (process-result-set database result)))
 
 ;(defparameter *m* (mysql-init (null-pointer)))
 ;(mysql-real-connect *m* "localhost" "stkni" (null-pointer) "dpbsdk" 0 (null-pointer) 0)
