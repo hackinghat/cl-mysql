@@ -5,10 +5,27 @@
 (in-package cl-mysql)
 
 (define-foreign-library libmysqlclient
-  (t (:default "libmysqlclient")))
+  (t (:default "libmysqlclient_r")))
 
 (use-foreign-library libmysqlclient)
 
+;;
+;; Client options
+(defconstant +client-compress+ 32)
+(defconstant +client-found-rows+ 2)
+(defconstant +client-ignore-sigpipe+ 4096)
+(defconstant +client-ignore-space+ 256)
+(defconstant +client-interactive+ 1024)
+(defconstant +client-local-files+ 128)
+(defconstant +client-multi-statements+  (ash 1 16))
+(defconstant +client-multi-results+ (ash 1 17))
+(defconstant +client-no-schema+ 16)
+(defconstant +client-ssl+ (ash 1 11))
+(defconstant +client-remember-options+ (ash 1 31))
+;;
+;;
+;; Error codes
+;;
 (defconstant +commands-out-of-sync+ 2014)
 (defconstant +error-first+ 2000)
 (defconstant +unknown-error+ 2000)
@@ -72,9 +89,13 @@
   (mysql :pointer))
 
 (defcfun ("mysql_close" mysql-close) :pointer
+  "http://dev.mysql.com/doc/refman/5.0/en/mysql-close.html"
   (mysql :pointer))
 
 (defcfun ("mysql_error" mysql-error) :string
+  (mysql :pointer))
+
+(defcfun ("mysql_errno" mysql-errno) :unsigned-int 
   (mysql :pointer))
 
 (defcfun ("mysql_real_connect" mysql-real-connect) :pointer
@@ -87,11 +108,30 @@
   (unix-socket :string)
   (client-flag :unsigned-long))
 
+(defcfun ("mysql_affected_rows" mysql-affected-rows) :unsigned-long-long
+  "http://dev.mysql.com/doc/refman/5.0/en/mysql-affected-rows.html"
+  (mysql :pointer))
+
+(defcfun ("mysql_character_set_name" mysql-character-set-name) :string
+  "http://dev.mysql.com/doc/refman/5.0/en/mysql-character-set-name.html"
+  (mysql :pointer))
+
+(defcfun ("mysql_ping" mysql-ping) :int
+  "http://dev.mysql.com/doc/refman/5.0/en/mysql-ping.html"
+  (mysql :pointer))
+
 (defcfun ("mysql_query" mysql-query) :int
   (mysql :pointer)
   (statement :string))
 
 (defcfun ("mysql_field_count" mysql-field-count) :unsigned-int
+  (mysql :pointer))
+
+(defcfun ("mysql_get_client_version" mysql-get-client-version) :unsigned-long
+  "http://dev.mysql.com/doc/refman/5.0/en/mysql-get-client-version.html")
+
+(defcfun ("mysql_get_server_version" mysql-get-server-version) :unsigned-long
+  "http://dev.mysql.com/doc/refman/5.0/en/mysql-get-client-version.html"
   (mysql :pointer))
 
 (defcfun ("mysql_select_db" mysql-select-db) :int
@@ -104,11 +144,7 @@
 (defcfun ("mysql_num_rows" mysql-num-rows) :unsigned-long-long
   (mysql-res :pointer))
 
-(defcfun ("mysql_affected_rows" mysql-affected-rows) :unsigned-long-long
-  (mysql :pointer))
 
-(defcfun ("mysql_character_set_name" mysql-character-set-name) :string
-  (mysql :pointer))
 
 (defcfun ("mysql_fetch_row" mysql-fetch-row) :pointer
   (mysql-res :pointer))
@@ -164,26 +200,63 @@
 (defcfun ("mysql_fetch_fields" mysql-fetch-fields) :pointer
   (mysql-res :pointer))
 
-(defun query (database query)
-  (let* ((query-return (mysql-query database query))
-	 (query-result (mysql-store-result database))
-	 (num-fields (1- (mysql-num-fields query-result)))
-	 (fields (mysql-fetch-fields query-result))
-	 (field-names (loop for i from 0 to num-fields
-		    collect (let ((mref (mem-aref fields 'mysql-field i)))
-			      (cons
-			       (foreign-slot-value mref 'mysql-field 'name)
-			       (foreign-enum-keyword
-				'enum-field-types
-				(foreign-slot-value mref 'mysql-field 'type))))))
-	 (data (do ((row (mysql-fetch-row query-result)
-			 (mysql-fetch-row query-result))
-		    (result nil (cons (mem-ref row :string) result)))
-		   ((null-pointer-p row) result))))
-    (mysql-free-result query-result)
-    (values data field-names)))
+(defun field-names-and-types (mysql-res)
+  "Retrieve from a MYSQL_RES a list of cons ((<field name> <field type>)*) "
+  (let ((num-fields (1- (mysql-num-fields mysql-res)))
+	(fields (mysql-fetch-fields mysql-res)))
+    (loop for i from 0 to num-fields
+       collect (let ((mref (mem-aref fields 'mysql-field i)))
+		 (cons
+		  (foreign-slot-value mref 'mysql-field 'name)
+		  (foreign-enum-keyword
+		   'enum-field-types
+		   (foreign-slot-value mref 'mysql-field 'type)))))))
 
-(defun connect (&key host user password database port socket client-flag)
+(defun result-data-raw (mysql-res)
+  "Internal function that processes a result set and returns all the data"
+  (let ((num-fields (1- (mysql-num-fields mysql-res))))
+    (loop for row = (mysql-fetch-row mysql-res)
+       until (null-pointer-p row)
+       collect (loop for i from 0 to num-fields
+		  collect (mem-aref row :string i)))))
+
+(defun process-result-set (database mysql-res)
+  "Result set will be NULL if the command did not return any results.   In this case we return a cons
+   the rows affected."
+  (cond ((null-pointer-p mysql-res)
+	 (cons (mysql-affected-rows database) nil))
+	(t
+	 (cons
+	  (field-names-and-types mysql-res)
+	  (result-data-raw mysql-res)))))
+
+(defmacro error-if-non-zero (database &body command)
+  `(let ((return-value ,@command))
+     (if (not (eq 0 return-value))
+	 (error (format nil "MySQL error: \"~A\" (errno = ~D)."
+			(mysql-error ,database)
+			(mysql-errno ,database))))))
+
+(defun use (database name)
+  "Equivalent to \"USE <name>\""
+  (error-if-non-zero database (mysql-select-db database name)))
+
+(defun query (database query)
+  (error-if-non-zero database (mysql-query database query))
+  (loop for result-set = (mysql-store-result database)
+       collect (process-result-set database result-set)
+       until (progn
+	       (mysql-free-result result-set)
+	       (not (eq 0 (mysql-next-result database))))))
+
+(defun ping (database)
+  (error-if-non-zero database (mysql-ping database))
+  (values t))
+
+(defun connect (&key host user password database port socket (client-flag (list +client-compress+
+										+client-multi-statements+
+										+client-multi-results+)))
+  "By default we turn on CLIENT_COMPRESS, CLIENT_MULTI_STATEMENTS and CLIENT_MULTI_RESULTS."
   (let* ((mysql (mysql-init (null-pointer))))
     (mysql-real-connect mysql
 			(or host "localhost")
@@ -192,8 +265,24 @@
 			(or database (null-pointer))
 			(or port 0)
 			(or socket (null-pointer))
-			(or client-flag 0))
+			(or (reduce #'logior (or client-flag '(0)))))
     (values mysql)))
+
+(defun disconnect (database)
+  (mysql-close database))
+
+(defun decode-version (int-version)
+  "Return a list of version details <major> <release> <version>"
+  (let* ((version (mod int-version 100))
+	 (major-version (floor int-version 10000))
+	 (release-level (mod (floor int-version 100) 10)))
+    (values (list major-version release-level version))))
+
+(defun client-version ()
+  (decode-version (mysql-get-client-version)))
+
+(defun server-version (database)
+  (decode-version (mysql-get-server-version database)))
 
 ;(defparameter *m* (mysql-init (null-pointer)))
 ;(mysql-real-connect *m* "localhost" "stkni" (null-pointer) "dpbsdk" 0 (null-pointer) 0)
