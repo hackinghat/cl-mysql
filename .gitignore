@@ -2,3 +2,4 @@
 *.[ao]
 .*.swp
 .swp
+*.fasl
