@@ -85,6 +85,32 @@
 (defconstant +not-implemented+ 2054)
 (defconstant +server-lost-extended+ 2055)
 
+(defun make-function-name (string)
+  (with-output-to-string (s)
+    (dotimes (c (length string))
+      (let ((ch (char string c)))
+	(format s "~A" (if (eq ch #\_) "-" ch))))))
+
+(defmacro defmysqlfun (name return-type &rest args)
+  "Takes a mysql function name as a string and registers the 
+   cffi function as (lib<name>, where _ are replaced with -).  
+   A wrapper function call <name> is also defined (again with _s replaced),
+   and this function will call the lib<name>, unless the 'alt-fn
+   property has been set on the function's symbol.   If such a function
+   exists it is called instead"
+  (let* ((n name)
+	 (int-name (intern (string-upcase (make-function-name n))))
+	 (int-libname (intern (string-upcase
+			    (format nil "lib~A" int-name))))
+	 (arg-names (mapcar #'car args)))
+    `(progn  (defcfun (,n ,int-libname) ,return-type
+	       ,@args)
+	     (defun ,int-name ,arg-names
+	       (let ((alt-fn (get ',int-name 'alt-fn)))
+		 (if alt-fn
+		     (funcall alt-fn ,@arg-names)
+		     (,int-libname ,@arg-names)))))))
+  
 (defcfun ("mysql_init" mysql-init) :pointer
   (mysql :pointer))
 
@@ -107,6 +133,16 @@
   (port :int)
   (unix-socket :string)
   (client-flag :unsigned-long))
+
+;(defmysqlfun "mysql_real_connect" :pointer
+;  (mysql :pointer)
+;  (host :string)
+;  (user :string)
+;  (password :string)
+;  (database :string)
+;  (port :int)
+;  (unix-socket :string)
+;  (client-flag :unsigned-long))
 
 (defcfun ("mysql_affected_rows" mysql-affected-rows) :unsigned-long-long
   "http://dev.mysql.com/doc/refman/5.0/en/mysql-affected-rows.html"
