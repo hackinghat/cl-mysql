@@ -1,3 +1,5 @@
+;; $Id$
+
 (defpackage com.hackinghat.cl-mysql
   (:use :cffi :cl)
   (:nicknames "CL-MYSQL")
@@ -545,6 +547,7 @@
 
 (defun option (option value &key database)
   (typecase value
-    (string (%set-string-option option value :database database))
-    (null   (%set-int-option option 0 :database database))
-    (t      (%set-int-option option value :database database))))
+    (string  (%set-string-option option value :database database))
+    (null    (%set-int-option option 0 :database database))
+    (integer (%set-int-option option value :database database))
+    (t       (%set-int-option option 1 :database database))))
