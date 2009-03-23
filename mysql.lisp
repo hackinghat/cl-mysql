@@ -1,6 +1,7 @@
 (defpackage com.hackinghat.cl-mysql
   (:use :cffi :cl)
-  (:nicknames "CL-MYSQL"))
+  (:nicknames "CL-MYSQL")
+  (:export #:connect #:query #:use #:disconnect))
 
 (in-package cl-mysql)
 
@@ -22,6 +23,39 @@
 (defconstant +client-no-schema+ 16)
 (defconstant +client-ssl+ (ash 1 11))
 (defconstant +client-remember-options+ (ash 1 31))
+
+;;
+;; Field flags
+(defconstant +field-not-null+ 1
+  "Field can't be null") 
+(defconstant +field-primary-key+ 2
+  "Field is part of a primary key")
+(defconstant +field-unique-key+ 4
+  "Field is part of a unique key")
+(defconstant +field-multiple-key+ 8
+  "Field is part of a key")
+(defconstant +field-blob+ 16
+  "Field is a blob")
+(defconstant +field-unsigned+ 32
+  "Field is unsigned")
+(defconstant +field-zerofill+ 64
+  "Field is zerofill")
+(defconstant +field-binary+ 128
+  "Field is binary")
+(defconstant +field-enum+ 256
+  "Field is an enum")
+(defconstant +field-auto-increment+ 512
+  "Field is auto increment")
+(defconstant +field-timestamp+ 1024
+  "Field is a timestamp")
+(defconstant +field-set+ 2048
+  "Field is a set")
+(defconstant +field-no-default+ 4096
+  "Field doesn't have a default value")
+(defconstant +field-num+ 32768
+  "Field is num")
+(defconstant +field-num+ 32768
+  "Field is num")
 ;;
 ;;
 ;; Error codes
@@ -91,7 +125,13 @@
       (let ((ch (char string c)))
 	(format s "~A" (if (eq ch #\_) "-" ch))))))
 
-(defmacro defmysqlfun (name return-type &rest args)
+(eval-when (:compile-toplevel)
+  (defparameter *generate-alt-fns* t
+    "Compile the library with this value equal to T to get the indirection 
+   facility.   For more performance (because there is no wrapper around
+   the CFFI wrapper!) set this value to NIL"))
+
+(defmacro defmysqlfun ((name internal-name) return-type &body args)
   "Takes a mysql function name as a string and registers the 
    cffi function as (lib<name>, where _ are replaced with -).  
    A wrapper function call <name> is also defined (again with _s replaced),
@@ -99,32 +139,41 @@
    property has been set on the function's symbol.   If such a function
    exists it is called instead"
   (let* ((n name)
-	 (int-name (intern (string-upcase (make-function-name n))))
+	 (int-name internal-name)
 	 (int-libname (intern (string-upcase
 			    (format nil "lib~A" int-name))))
+	 (docstring (if (stringp (car args))
+			(pop args)
+			(format nil "Library wrapper for MySQL function: ~A" name)))
 	 (arg-names (mapcar #'car args)))
-    `(progn  (defcfun (,n ,int-libname) ,return-type
-	       ,@args)
-	     (defun ,int-name ,arg-names
-	       (let ((alt-fn (get ',int-name 'alt-fn)))
-		 (if alt-fn
-		     (funcall alt-fn ,@arg-names)
-		     (,int-libname ,@arg-names)))))))
+    (if *generate-alt-fns* 
+	`(progn  (defcfun (,n ,int-libname) ,return-type
+		   ,docstring
+		   ,@args)
+		 (defun ,int-name ,arg-names
+		   (let ((alt-fn (get ',int-name 'alt-fn)))
+		     (if alt-fn
+			 (funcall alt-fn ,@arg-names)
+			 (,int-libname ,@arg-names)))))
+	`(defcfun (,n ,int-name) ,return-type
+	   ,docstring
+	   ,@args))))
   
-(defcfun ("mysql_init" mysql-init) :pointer
+(defmysqlfun ("mysql_init" mysql-init) :pointer
+  "http://dev.mysql.com/doc/refman/5.0/en/mysql-init.html"
   (mysql :pointer))
 
-(defcfun ("mysql_close" mysql-close) :pointer
+(defmysqlfun ("mysql_close" mysql-close) :pointer
   "http://dev.mysql.com/doc/refman/5.0/en/mysql-close.html"
   (mysql :pointer))
 
-(defcfun ("mysql_error" mysql-error) :string
+(defmysqlfun ("mysql_error" mysql-error) :string
   (mysql :pointer))
 
-(defcfun ("mysql_errno" mysql-errno) :unsigned-int 
+(defmysqlfun ("mysql_errno" mysql-errno) :unsigned-int 
   (mysql :pointer))
 
-(defcfun ("mysql_real_connect" mysql-real-connect) :pointer
+(defmysqlfun ("mysql_real_connect" mysql-real-connect) :pointer
   (mysql :pointer)
   (host :string)
   (user :string)
@@ -134,90 +183,80 @@
   (unix-socket :string)
   (client-flag :unsigned-long))
 
-;(defmysqlfun "mysql_real_connect" :pointer
-;  (mysql :pointer)
-;  (host :string)
-;  (user :string)
-;  (password :string)
-;  (database :string)
-;  (port :int)
-;  (unix-socket :string)
-;  (client-flag :unsigned-long))
-
-(defcfun ("mysql_affected_rows" mysql-affected-rows) :unsigned-long-long
+(defmysqlfun ("mysql_affected_rows" mysql-affected-rows) :unsigned-long-long
   "http://dev.mysql.com/doc/refman/5.0/en/mysql-affected-rows.html"
   (mysql :pointer))
 
-(defcfun ("mysql_character_set_name" mysql-character-set-name) :string
+(defmysqlfun ("mysql_character_set_name" mysql-character-set-name) :string
   "http://dev.mysql.com/doc/refman/5.0/en/mysql-character-set-name.html"
   (mysql :pointer))
 
-(defcfun ("mysql_ping" mysql-ping) :int
+(defmysqlfun ("mysql_ping" mysql-ping) :int
   "http://dev.mysql.com/doc/refman/5.0/en/mysql-ping.html"
   (mysql :pointer))
 
-(defcfun ("mysql_query" mysql-query) :int
+(defmysqlfun ("mysql_query" mysql-query) :int
   (mysql :pointer)
   (statement :string))
 
-(defcfun ("mysql_field_count" mysql-field-count) :unsigned-int
+(defmysqlfun ("mysql_field_count" mysql-field-count) :unsigned-int
   (mysql :pointer))
 
-(defcfun ("mysql_get_client_version" mysql-get-client-version) :unsigned-long
+(defmysqlfun ("mysql_get_client_version" mysql-get-client-version) :unsigned-long
   "http://dev.mysql.com/doc/refman/5.0/en/mysql-get-client-version.html")
 
-(defcfun ("mysql_get_server_version" mysql-get-server-version) :unsigned-long
+(defmysqlfun ("mysql_get_server_version" mysql-get-server-version) :unsigned-long
   "http://dev.mysql.com/doc/refman/5.0/en/mysql-get-client-version.html"
   (mysql :pointer))
 
-(defcfun ("mysql_select_db" mysql-select-db) :int
+(defmysqlfun ("mysql_select_db" mysql-select-db) :int
   (mysql :pointer)
   (db :string))
 
-(defcfun ("mysql_store_result" mysql-store-result) :pointer
+(defmysqlfun ("mysql_store_result" mysql-store-result) :pointer
   (mysql :pointer))
 
-(defcfun ("mysql_num_rows" mysql-num-rows) :unsigned-long-long
+(defmysqlfun ("mysql_num_rows" mysql-num-rows) :unsigned-long-long
   (mysql-res :pointer))
 
-(defcfun ("mysql_list_dbs" mysql-list-dbs) :pointer
+(defmysqlfun ("mysql_list_dbs" mysql-list-dbs) :pointer
   "http://dev.mysql.com/doc/refman/5.0/en/mysql-list-dbs.html"
   (mysql :pointer)
   (wild :string))
 
-(defcfun ("mysql_list_tables" mysql-list-tables) :pointer
+(defmysqlfun ("mysql_list_tables" mysql-list-tables) :pointer
   "http://dev.mysql.com/doc/refman/5.0/en/mysql-list-dbs.html"
   (mysql :pointer)
   (wild :string))
 
-(defcfun ("mysql_list_fields" mysql-list-fields) :pointer
+(defmysqlfun ("mysql_list_fields" mysql-list-fields) :pointer
   "http://dev.mysql.com/doc/refman/5.0/en/mysql-list-fields.html"
   (mysql :pointer)
   (table :string)
   (wild :string))
 
-(defcfun ("mysql_list_processes" mysql-list-processes) :pointer
+(defmysqlfun ("mysql_list_processes" mysql-list-processes) :pointer
   "http://dev.mysql.com/doc/refman/5.0/en/mysql-list-processes.html"
   (mysql :pointer))
 
-(defcfun ("mysql_fetch_row" mysql-fetch-row) :pointer
+(defmysqlfun ("mysql_fetch_row" mysql-fetch-row) :pointer
   (mysql-res :pointer))
 
-(defcfun ("mysql_free_result" mysql-free-result) :void
+(defmysqlfun ("mysql_free_result" mysql-free-result) :void
   (mysql-res :pointer))
 
-(defcfun ("mysql_fetch_lengths" mysql-fetch-lengths) :pointer
+(defmysqlfun ("mysql_fetch_lengths" mysql-fetch-lengths) :pointer
   (mysql-res :pointer))
 
-(defcfun ("mysql_num_fields" mysql-num-fields) :unsigned-int
+(defmysqlfun ("mysql_num_fields" mysql-num-fields) :unsigned-int
   (mysql-res :pointer))
 
-(defcfun ("mysql_next_result" mysql-next-result) :int
+(defmysqlfun ("mysql_next_result" mysql-next-result) :int
   (mysql :pointer))
 
 (defcenum enum-field-types
   :decimal :tiny :short :long :float :double :null :timestamp :longlong
-  :date :time :datetime :year :newdate :varchar :bit
+  :int24 :date :time :datetime :year :newdate :varchar :bit
   (:newdecimal 246)
   (:enum 247)
   (:set 248)
@@ -228,6 +267,49 @@
   (:var-string 253)
   (:string 254)
   (:geometry 255))
+
+(defun string-to-fixnum (string)
+  (parse-integer string))
+
+(defun string-to-float (string)
+  (let* ((radix-position (position #\. string))
+	 (int-part (coerce (parse-integer (subseq string 0 radix-position)) 'long-float))
+	 (float-part (coerce (parse-integer (subseq string (1+ radix-position))) 'long-float))
+	 (float-log-10 (log float-part 10))
+	 (float-size (ceiling float-log-10)))
+    (+ int-part (expt 10 (- float-log-10 float-size)))))
+
+(defun string-to-bool (string)
+  (eq 1 (string-to-fixnum string)))
+
+(defun string-to-unix-time (string)
+  (declare (ignore string))
+  (error "Not implemented yet!"))
+
+(defun string-to-seconds (string)
+  (declare (ignore string))
+  (error "Not implemented yet!"))
+
+(defparameter *type-map*
+  `((:DECIMAL . ,#'string-to-float)
+    (:TINY . ,#'string-to-fixnum)
+    (:SHORT . ,#'string-to-fixnum)
+    (:LONG . ,#'string-to-fixnum)
+    (:FLOAT . ,#'string-to-float)
+    (:DOUBLE . ,#'string-to-float)
+    (:NULL . ,(lambda (string)
+	       (declare (ignore string))
+	       (values nil)))
+    (:TIMESTAMP . ,#'string-to-unix-time)
+    (:LONGLONG . ,#'string-to-fixnum)
+    (:INT24 . ,#'string-to-fixnum)
+    (:DATE . ,#'string-to-unix-time)
+    (:TIME . ,#'string-to-seconds)
+    (:DATETIME . ,#'string-to-unix-time)
+    (:YEAR . ,#'string-to-fixnum)
+    (:NEWDATE . ,#'string-to-unix-time)
+    (:BIT . ,#'string-to-bool)
+    (:NEWDECIMAL . ,#'string-to-float)))
 
 (defcstruct mysql-field
   (name :string)
@@ -251,8 +333,31 @@
   (charsetnr :unsigned-int)
   (type :int))
 
-(defcfun ("mysql_fetch_fields" mysql-fetch-fields) :pointer
+(defmysqlfun ("mysql_fetch_fields" mysql-fetch-fields) :pointer
   (mysql-res :pointer))
+
+
+;;;
+;;; Abstractions
+;;;
+(defparameter *connection-stack* nil)
+
+(defun add-connection (mysql)
+  "Adds a connection to the pool"
+  (push mysql *connection-stack*))
+
+(defun get-connection ()
+  "Adds a connection to the pool"
+  (unless *connection-stack*
+    (error "There are no connections established!"))
+  (car *connection-stack*))
+
+(defun drop-connection ()
+  (pop *connection-stack*))
+
+(defmacro with-connection ((var &optional database) &body body)
+  `(let ((,var (or ,database (get-connection))))
+     ,@body))
 
 (defun field-names-and-types (mysql-res)
   "Retrieve from a MYSQL_RES a list of cons ((<field name> <field type>)*) "
@@ -274,11 +379,11 @@
        collect (loop for i from 0 to num-fields
 		  collect (mem-aref row :string i)))))
 
-(defun process-result-set (database mysql-res)
+(defun process-result-set (mysql-res &key database)
   "Result set will be NULL if the command did not return any results.   In this case we return a cons
    the rows affected."
   (cond ((null-pointer-p mysql-res)
-	 (cons (mysql-affected-rows database) nil))
+	 (cons (mysql-affected-rows (or database (get-connection))) nil))
 	(t
 	 (cons
 	  (field-names-and-types mysql-res)
@@ -301,21 +406,26 @@
 	 return-value)))
 
 
-(defun use (database name)
+(defun use (name &key database)
   "Equivalent to \"USE <name>\""
-  (error-if-non-zero database (mysql-select-db database name)))
+  (with-connection (conn database)
+    (error-if-non-zero conn (mysql-select-db conn name))
+    (values)))
 
-(defun query (database query &optional callback)
-  (error-if-non-zero database (mysql-query database query))
-  (loop for result-set = (mysql-store-result database)
-       collect (process-result-set database result-set)
+(defun query (query &key raw database)
+  "Queries"
+  (with-connection (conn database)
+    (error-if-non-zero conn (mysql-query conn query))
+    (loop for result-set = (mysql-store-result conn)
+       collect (process-result-set result-set :database conn)
        until (progn
 	       (mysql-free-result result-set)
-	       (not (eq 0 (mysql-next-result database))))))
+	       (not (eq 0 (mysql-next-result conn)))))))
 
 (defun ping (database)
-  (error-if-non-zero database (mysql-ping database))
-  (values t))
+  (with-connection (conn database)
+    (error-if-non-zero conn (mysql-ping conn))
+    (values t)))
 
 (defun connect (&key host user password database port socket (client-flag (list +client-compress+
 										+client-multi-statements+
@@ -330,10 +440,12 @@
 			(or port 0)
 			(or socket (null-pointer))
 			(or (reduce #'logior (or client-flag '(0)))))
+    (add-connection mysql)
     (values mysql)))
 
-(defun disconnect (database)
-  (mysql-close database))
+(defun disconnect (&key database)
+  (with-connection (conn database)
+    (mysql-close conn)))
 
 (defun decode-version (int-version)
   "Return a list of version details <major> <release> <version>"
@@ -349,31 +461,22 @@
   (decode-version (mysql-get-server-version database)))
 
 (defun list-dbs (database)
-  (let ((result (error-if-null database (mysql-list-dbs database (null-pointer)))))
-    (process-result-set database result)))
+  (with-connection (conn database)
+    (let ((result (error-if-null conn (mysql-list-dbs conn (null-pointer)))))
+      (process-result-set result :database conn))))
 
-(defun list-tables (database)
-  (let ((result (error-if-null database (mysql-list-tables database (null-pointer)))))
-    (process-result-set database result)))
+(defun list-tables (&key database)
+  (with-connection (conn database)
+    (let ((result (error-if-null conn (mysql-list-tables conn (null-pointer)))))
+      (process-result-set result :database conn))))
 
-(defun list-fields (database table)
-  (let ((result (error-if-null database (mysql-list-fields database table (null-pointer)))))
-    (process-result-set database result)))
+(defun list-fields (table &key database)
+  (with-connection (conn database)
+    (let ((result (error-if-null conn (mysql-list-fields conn table (null-pointer)))))
+      (process-result-set result :database conn))))
 
-(defun list-processes (database)
-  (let ((result (error-if-null database (mysql-list-processes database))))
-    (process-result-set database result)))
+(defun list-processes (&key database)
+  (with-connection (conn database)
+    (let ((result (error-if-null conn (mysql-list-processes conn))))
+      (process-result-set result :database conn))))
 
-;(defparameter *m* (mysql-init (null-pointer)))
-;(mysql-real-connect *m* "localhost" "stkni" (null-pointer) "dpbsdk" 0 (null-pointer) 0)
-;(mysql-query *m* "SELECT COUNT(*) FROM price")
-;(defparameter *r* (mysql-store-result *m*))
-;(mysql-num-fields *r*)
-;(defparameter *f* (mysql-fetch-fields *r*))
-;(foreign-slot-value *f* 'mysql-field 'name)
-;(foreign-enum-keyword 'enum-field-types (foreign-slot-value *f* 'mysql-field 'type))
-;(defparameter *row* (mysql-fetch-row *r*))
-;(mem-ref *row* :string)
-;(mysql-free-result *f*)
-;(mysql-next-result *r*)
-;

@@ -1,7 +1,11 @@
-;; $Id: tdm.asd 322 2009-02-15 18:41:21Z  $
+;; $Id$
 
 (asdf:defsystem #:cl-mysql
   :serial t
+  :description "Common Lisp MySQL library bindings"
+  :version "0.1"
+  :author "Steve Knight <stkni@yahoo.com>"
+  :licence "LLGPL"
   :components ((:file "mysql"))
   :depends-on (#:cffi))
 
