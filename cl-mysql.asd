@@ -8,8 +8,5 @@
   :licence "LLGPL"
   :components ((:file "mysql"))
   :depends-on (#:cffi))
-
-
-
-  
+ 
   
