@@ -1,5 +1,3 @@
-;; $Id$
-
 (defpackage com.hackinghat.cl-mysql
   (:use :cffi :cl)
   (:nicknames "CL-MYSQL")
@@ -311,27 +309,6 @@
 ;;
 ;; Decoders
 ;;
-(defparameter *type-map*
-  `((:DECIMAL . ,#'string-to-float)
-    (:TINY . ,#'string-to-fixnum)
-    (:SHORT . ,#'string-to-fixnum)
-    (:LONG . ,#'string-to-fixnum)
-    (:FLOAT . ,#'string-to-float)
-    (:DOUBLE . ,#'string-to-float)
-    (:NULL . ,(lambda (string)
-		      (declare (ignore string))
-		      (values nil)))
-    (:TIMESTAMP . ,#'string-to-universal-time)
-    (:LONGLONG . ,#'string-to-fixnum)
-    (:INT24 . ,#'string-to-fixnum)
-    (:DATE . ,#'string-to-universal-time)
-    (:TIME . ,#'string-to-seconds)
-    (:DATETIME . ,#'string-to-universal-time)
-    (:YEAR . ,#'string-to-fixnum)
-    (:NEWDATE . ,#'string-to-unix-time)
-    (:BIT . ,#'string-to-bool)
-    (:NEWDECIMAL . ,#'string-to-float)))
-
 (defun string-to-fixnum (string)
   (when (and string (> (length string) 0)) 
     (parse-integer string)))
@@ -368,8 +345,48 @@
     (+ (string-to-date (subseq string 0 10))
        (string-to-seconds (subseq string 11)))))
 
+(defparameter *type-map*
+  `((:DECIMAL . ,#'string-to-float)
+    (:TINY . ,#'string-to-fixnum)
+    (:SHORT . ,#'string-to-fixnum)
+    (:LONG . ,#'string-to-fixnum)
+    (:FLOAT . ,#'string-to-float)
+    (:DOUBLE . ,#'string-to-float)
+    (:NULL . ,(lambda (string)
+		      (declare (ignore string))
+		      (values nil)))
+    (:TIMESTAMP . ,#'string-to-universal-time)
+    (:LONGLONG . ,#'string-to-fixnum)
+    (:INT24 . ,#'string-to-fixnum)
+    (:DATE . ,#'string-to-universal-time)
+    (:TIME . ,#'string-to-seconds)
+    (:DATETIME . ,#'string-to-universal-time)
+    (:YEAR . ,#'string-to-fixnum)
+    (:NEWDATE . ,#'string-to-universal-time)
+    (:BIT . ,#'string-to-bool)
+    (:NEWDECIMAL . ,#'string-to-float)))
+
 ;;;
-;;; Wrappers
+;;; Error handling
+;;;
+(defmacro error-if-non-zero (database &body command)
+  `(let ((return-value ,@command))
+     (if (not (eq 0 return-value))
+	 (error (format nil "MySQL error: \"~A\" (errno = ~D)."
+			(mysql-error ,database)
+			(mysql-errno ,database)))
+	 return-value)))
+
+(defmacro error-if-null (database &body command)
+  `(let ((return-value ,@command))
+     (if (null-pointer-p return-value)
+	 (error (format nil "MySQL error: \"~A\" (errno = ~D)."
+			(mysql-error ,database)
+			(mysql-errno ,database)))
+	 return-value)))
+
+;;;
+;;; Connections
 ;;;
 (defparameter *connection-stack* nil)
 
@@ -390,6 +407,9 @@
   `(let ((,var (or ,database (get-connection))))
      ,@body))
 
+;;;
+;;; High level API
+;;;
 (defun use (name &key database)
   "Equivalent to \"USE <name>\""
   (with-connection (conn database)
@@ -433,22 +453,6 @@
 ;;
 ;; Result set functions
 ;;
-(defmacro error-if-non-zero (database &body command)
-  `(let ((return-value ,@command))
-     (if (not (eq 0 return-value))
-	 (error (format nil "MySQL error: \"~A\" (errno = ~D)."
-			(mysql-error ,database)
-			(mysql-errno ,database)))
-	 return-value)))
-
-(defmacro error-if-null (database &body command)
-  `(let ((return-value ,@command))
-     (if (null-pointer-p return-value)
-	 (error (format nil "MySQL error: \"~A\" (errno = ~D)."
-			(mysql-error ,database)
-			(mysql-errno ,database)))
-	 return-value)))
-
 (defun field-names-and-types (mysql-res)
   "Retrieve from a MYSQL_RES a list of cons ((<field name> <field type>)*) "
   (let ((num-fields (1- (mysql-num-fields mysql-res)))
@@ -547,7 +551,6 @@
 
 (defun option (option value &key database)
   (typecase value
-    (string  (%set-string-option option value :database database))
-    (null    (%set-int-option option 0 :database database))
-    (integer (%set-int-option option value :database database))
-    (t       (%set-int-option option 1 :database database))))
+    (string (%set-string-option option value :database database))
+    (null   (%set-int-option option 0 :database database))
+    (t      (%set-int-option option value :database database))))
