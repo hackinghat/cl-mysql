@@ -316,11 +316,12 @@
 (defun string-to-float (string)
   (when string
     (let* ((radix-position (position #\. string))
-	   (int-part (coerce (parse-integer string :start 0 :end radix-position) 'long-float))
-	   (float-part (coerce (parse-integer string :start (1+ radix-position)) 'long-float))
-	   (float-log-10 (log float-part 10))
-	   (float-size (ceiling float-log-10)))
-      (+ int-part (expt 10 (- float-log-10 float-size))))))
+	   (int-part (coerce (parse-integer string :start 0 :end radix-position) 'long-float)))
+      (cond ((null radix-position) int-part)
+	    (t (let* ((float-part (coerce (parse-integer string :start (1+ radix-position)) 'long-float))
+		     (float-log-10 (log float-part 10))
+		     (float-size (ceiling float-log-10)))
+	       (+ int-part (expt 10 (- float-log-10 float-size)))))))))
 
 (defun string-to-bool (string)
   (when string
@@ -494,7 +495,7 @@
 	    (mapcar #'car fields)
 	    (result-data mysql-res (unless raw fields)))))))
 
-(defun query (query &key raw database)
+(defun query (query &key (raw t) database)
   "Queries the connection.  Set raw to T if you don't want CL-MYSQL to decode
    the return data (this will leave them as strings)"
   (with-connection (conn database)
