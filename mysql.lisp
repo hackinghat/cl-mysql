@@ -1,11 +1,23 @@
 (defpackage com.hackinghat.cl-mysql
-  (:use :cffi :cl)
+  (:use :cl)
   (:nicknames "CL-MYSQL")
   (:export #:connect #:query #:use #:disconnect #:ping #:option
 	   #:client-version #:server-version
 	   #:list-dbs #:list-tables #:list-processes #:list-fields))
 
 (in-package cl-mysql)
+
+(defpackage com.hackinghat.cl-mysql-system
+  (:use :cl)
+  (:nicknames "CL-MYSQL-SYSTEM")
+  (:export ;; Public functions
+           #:connect #:query #:use #:disconnect #:ping #:option
+	   #:client-version #:server-version
+	   #:list-dbs #:list-tables #:list-processes #:list-fields
+	   ;; Internal functions
+	   #:string-to-fixnum))
+
+(in-package cl-mysql-system)
 
 (define-foreign-library libmysqlclient
   (t (:default "libmysqlclient_r")))
@@ -495,7 +507,7 @@
 	    (mapcar #'car fields)
 	    (result-data mysql-res (unless raw fields)))))))
 
-(defun query (query &key (raw t) database)
+(defun query (query &key raw database)
   "Queries the connection.  Set raw to T if you don't want CL-MYSQL to decode
    the return data (this will leave them as strings)"
   (with-connection (conn database)
