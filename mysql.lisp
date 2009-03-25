@@ -8,14 +8,16 @@
 (in-package cl-mysql)
 
 (defpackage com.hackinghat.cl-mysql-system
-  (:use :cl)
+  (:use :cl :cffi)
   (:nicknames "CL-MYSQL-SYSTEM")
   (:export ;; Public functions
            #:connect #:query #:use #:disconnect #:ping #:option
 	   #:client-version #:server-version
 	   #:list-dbs #:list-tables #:list-processes #:list-fields
+	   ;; Constants
 	   ;; Internal functions
-	   #:string-to-fixnum))
+	   #:string-to-fixnum #:string-to-float #:string-to-bit
+	   #:string-to-date #:string-to-seconds))
 
 (in-package cl-mysql-system)
 
@@ -323,10 +325,10 @@
 ;;
 (defun string-to-fixnum (string)
   (when (and string (> (length string) 0)) 
-    (parse-integer string)))
+    (parse-integer string :junk-allowed t)))
 
 (defun string-to-float (string)
-  (when string
+  (when (and string (> (length string) 0))
     (let* ((radix-position (position #\. string))
 	   (int-part (coerce (parse-integer string :start 0 :end radix-position) 'long-float)))
       (cond ((null radix-position) int-part)
@@ -335,23 +337,35 @@
 		     (float-size (ceiling float-log-10)))
 	       (+ int-part (expt 10 (- float-log-10 float-size)))))))))
 
-(defun string-to-bool (string)
-  (when string
-    (eq 1 (string-to-fixnum string))))
+(defun string-to-bit (string)
+  (when (and string (> (length string) 0))
+    (let ((result (string-to-fixnum string)))
+      (if (and result (> (abs result) 1))
+	  (error (format nil "Bit value ~A is not 0/1 or NULL!" result))
+	  (values result)))))
 
 (defun string-to-date (string)
-  (when string
+  (when (and string (> (length string) 9))
     (let ((y (parse-integer string :start 0 :end 4))
 	  (m (parse-integer string :start 5 :end 7))
 	  (d (parse-integer string :start 8 :end 10)))
       (encode-universal-time 0 0 0 d m y))))
 
 (defun string-to-seconds (string)
+  "Fairly ugly function to turn MySQL TIME duration into an integer representation. 
+   It's complicated because of ... well, read this:  http://dev.mysql.com/doc/refman/5.0/en/time.html"
   (when string
-    (let ((h (parse-integer string :start 0 :end 2))
-	  (m (parse-integer string :start 3 :end 5))
-	  (s (parse-integer string :start 6 :end 8)))
-      (+ (* h 3600) (* m 60) s))))
+    (let* ((strlen (length string))
+	   (offset (- strlen 8)))
+      (when (and (>= offset 0) (< offset 3)) 
+	(let* ((start (if (eq #\- (elt string 0)) 1 0))
+	       (h (parse-integer string :start start :end (+ 2 offset)))
+	       (m (parse-integer string :start (+ 3 offset) :end (+ 5 offset)))
+	       (s (parse-integer string :start (+ 6 offset) :end (+ 8 offset)))
+	       (time (+ (* h 3600) (* m 60) s)))
+	  (if (eq start 1)
+	      (values (* -1 time))
+	      (values time)))))))
 
 (defun string-to-universal-time (string)
   (when string
