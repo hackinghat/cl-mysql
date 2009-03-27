@@ -17,7 +17,7 @@
 	   ;; Constants
 	   ;; Internal functions
 	   #:string-to-fixnum #:string-to-float #:string-to-bit
-	   #:string-to-date #:string-to-seconds))
+	   #:string-to-date #:string-to-seconds #:string-to-universal-time))
 
 (in-package cl-mysql-system)
 
@@ -323,12 +323,12 @@
 ;;
 ;; Decoders
 ;;
-(defun string-to-fixnum (string)
-  (when (and string (> (length string) 0)) 
+(defun string-to-fixnum (string &optional len)
+  (when (and string (> (or len (length string)) 0)) 
     (parse-integer string :junk-allowed t)))
 
-(defun string-to-float (string)
-  (when (and string (> (length string) 0))
+(defun string-to-float (string &optional len)
+  (when (and string (> (or len (length string)) 0))
     (let* ((radix-position (position #\. string))
 	   (int-part (coerce (parse-integer string :start 0 :end radix-position) 'long-float)))
       (cond ((null radix-position) int-part)
@@ -337,25 +337,25 @@
 		     (float-size (ceiling float-log-10)))
 	       (+ int-part (expt 10 (- float-log-10 float-size)))))))))
 
-(defun string-to-bit (string)
-  (when (and string (> (length string) 0))
+(defun string-to-bit (string &optional len)
+  (when (and string (> (or len (length string)) 0))
     (let ((result (string-to-fixnum string)))
       (if (and result (> (abs result) 1))
 	  (error (format nil "Bit value ~A is not 0/1 or NULL!" result))
 	  (values result)))))
 
-(defun string-to-date (string)
-  (when (and string (> (length string) 9))
+(defun string-to-date (string &optional len)
+  (when (and string (> (or len (length string)) 9))
     (let ((y (parse-integer string :start 0 :end 4))
 	  (m (parse-integer string :start 5 :end 7))
 	  (d (parse-integer string :start 8 :end 10)))
       (encode-universal-time 0 0 0 d m y))))
 
-(defun string-to-seconds (string)
+(defun string-to-seconds (string &optional len)
   "Fairly ugly function to turn MySQL TIME duration into an integer representation. 
    It's complicated because of ... well, read this:  http://dev.mysql.com/doc/refman/5.0/en/time.html"
   (when string
-    (let* ((strlen (length string))
+    (let* ((strlen (or len (length string)))
 	   (offset (- strlen 8)))
       (when (and (>= offset 0) (< offset 3)) 
 	(let* ((start (if (eq #\- (elt string 0)) 1 0))
@@ -367,8 +367,8 @@
 	      (values (* -1 time))
 	      (values time)))))))
 
-(defun string-to-universal-time (string)
-  (when string
+(defun string-to-universal-time (string &optional len)
+  (when (and string (> (or len (length string)) 0))
     (+ (string-to-date (subseq string 0 10))
        (string-to-seconds (subseq string 11)))))
 
@@ -385,12 +385,11 @@
     (:TIMESTAMP . ,#'string-to-universal-time)
     (:LONGLONG . ,#'string-to-fixnum)
     (:INT24 . ,#'string-to-fixnum)
-    (:DATE . ,#'string-to-universal-time)
+    (:DATE . ,#'string-to-date)
     (:TIME . ,#'string-to-seconds)
     (:DATETIME . ,#'string-to-universal-time)
     (:YEAR . ,#'string-to-fixnum)
     (:NEWDATE . ,#'string-to-universal-time)
-    (:BIT . ,#'string-to-bool)
     (:NEWDECIMAL . ,#'string-to-float)))
 
 ;;;
@@ -457,7 +456,7 @@
   (with-connection (conn database)
     (decode-version (mysql-get-server-version conn))))
 
-(defun list-dbs (database)
+(defun list-dbs (&key database)
   (with-connection (conn database)
     (let ((result (error-if-null conn (mysql-list-dbs conn (null-pointer)))))
       (process-result-set result :database conn))))
@@ -493,22 +492,51 @@
 		   (foreign-slot-value mref 'mysql-field 'type))
 		  (foreign-slot-value mref 'mysql-field 'flags))))))
 
-(defun result-data (mysql-res field-names-and-types)
+(defparameter *binary-types* (list :BIT :BINARY :VARBINARY))
+(defun extract-field (row field-index field-length field-type field-flag)
+  "Returns either a string or an unsigned byte array for known binary types. The
+   designation of binary types per the C API seems a bit weird.   Basically,
+   BIT, BINARY and VARBINARY are binary and so are BLOBs with the binary flag
+   set.   It seems that other fields also have the binary flag set that are not
+   binary and the BIT type, whilst binary doesn't have the flag set.   Bizarre-o."
+  (if (or (and (eq field-type :BLOB)
+	       (eq +field-binary+ (logand +field-binary+ field-flag)))
+	  (find field-type *binary-types*))
+      (let ((arr (make-array field-length :element-type '(unsigned-byte 8)))
+	    (ptr (mem-aref row :pointer field-index)))
+	(loop for i from 0 to (1- field-length)
+	     do (setf (elt arr i) (mem-ref ptr :unsigned-char i)))
+	;(print arr)
+	(values arr))
+      (mem-aref row :string field-index)))
+
+(defun result-data (mysql-res raw field-names-and-types)
   "Internal function that processes a result set and returns all the data.
    If field-names-and-types is NIL the raw (string) data is returned"
   (let ((num-fields (1- (mysql-num-fields mysql-res))))
     (loop for row = (mysql-fetch-row mysql-res)
+	  for len = (mysql-fetch-lengths mysql-res)
        until (null-pointer-p row)
-       collect (if field-names-and-types
+       collect (if (not raw)
 		   (loop
 		     for i from 0 to num-fields
 		     for f in field-names-and-types
 		     collect
-			(let ((fn (cdr (assoc (second f) *type-map*))))
-			   (funcall (or fn #'identity) (mem-aref row :string i))))
+			(let* ((l (mem-aref len :int i))
+			      (type (second f))
+			      (flag (third f))
+			      (fn (cdr (assoc type *type-map*)))
+			      (raw (extract-field row i l type flag)))
+			   (if fn
+			       (funcall fn raw l)
+			       raw)))
 		   (loop
 		      for i from 0 to num-fields
-		      collect (mem-aref row :string i))))))
+		      for f in field-names-and-types
+		      collect (extract-field row i
+					     (mem-aref len :int i)
+					     (second f)
+					     (third f)))))))
 
 (defun process-result-set (mysql-res &key raw database)
   "Result set will be NULL if the command did not return any results.   In this case we return a cons
@@ -517,9 +545,10 @@
 	 (cons (mysql-affected-rows (or database (get-connection))) nil))
 	(t
 	 (let ((fields (field-names-and-types mysql-res)))
+	   ;(print fields)
 	   (cons
 	    (mapcar #'car fields)
-	    (result-data mysql-res (unless raw fields)))))))
+	    (result-data mysql-res raw fields))))))
 
 (defun query (query &key raw database)
   "Queries the connection.  Set raw to T if you don't want CL-MYSQL to decode

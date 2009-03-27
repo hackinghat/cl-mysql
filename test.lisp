@@ -46,3 +46,69 @@
   (is (eq 3023999 (string-to-seconds "839:59:59")))
   (is (eq -3023999 (string-to-seconds "-839:59:59"))))
 
+(deftest test-string-to-universal-time ()
+  (is (eq nil (string-to-universal-time nil)))
+  (is (eq nil (string-to-universal-time "")))
+  (is (eq 1
+	  (- (string-to-universal-time "2009-01-01 00:00:00")
+	     (string-to-universal-time "2008-12-31 23:59:59")))))
+
+
+(defsuite* test-with-connection)
+
+(deftest test-setup ()
+  (connect)
+  (query "DROP DATABASE IF EXISTS cl_mysql_test; CREATE DATABASE cl_mysql_test; 
+                  GRANT ALL ON cl_mysql_test.* TO USER(); FLUSH PRIVILEGES;")
+  (use "cl_mysql_test")
+  (query "CREATE TABLE test_table ( 
+                -- Integer numerics
+                bt BIT(6),
+                ti TINYINT UNSIGNED,
+                si SMALLINT SIGNED,
+                mi MEDIUMINT ZEROFILL,
+                i  INT(5) UNSIGNED,
+                bi BIGINT UNSIGNED,
+                -- Approximate numerics
+                f  FLOAT(7,4),
+                r  REAL(10,2),
+                dp DOUBLE PRECISION(15,5),
+                -- Precision numerics
+                d  DECIMAL(28,18),
+                n  NUMERIC(28,1),
+                -- Date and time
+                dt DATETIME,
+                da DATE,
+                tm TIME,
+                yr YEAR,
+                ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                -- String types
+                ch CHAR(10),
+                vc VARCHAR(15),
+                bn BINARY(3),
+                vb VARBINARY(10),
+                bb BLOB,
+                tb TINYBLOB,
+                mb MEDIUMBLOB,
+                lb LONGBLOB,
+                tt TINYTEXT,
+                tx TEXT,
+                mt MEDIUMTEXT,
+                lt LONGTEXT,
+                en ENUM ('small','medium','large'),
+                st SET ('one','two'),
+                -- Geomerty types
+                ge GEOMETRY)")
+  (is (eq 2 (length (list-tables))))
+  (query "INSERT INTO test_table (bt, ti, si, mi, i, bi, f, r, dp, d, n, 
+                                  dt, da, tm, yr, ch, vc, bn, vb, bb, tb,
+                                  mb, lb, tt, tx, mt, lt, en, st, ge) 
+          VALUES (b'100000', 255, -32768, 1, 4294967295, 18446744073709551615,  999.9999, 12312312.12, SQRT(2.0), 1.0/9.0, 1.0/9.0,
+                  '2009-12-31 00:00:00', '2009-12-31', '00:00:00', 2009, 'TEST1', 'TEST2', 'TEST3', 'TEST4', 'TEST5', 'TEST6', 
+                  'TEST7', 'TEST8', 'TEST9', 'TEST10', 'TEST11', 'TEST12', 'small','one,two',GeomFromText('POINT(1 1)'))")
+  ;; We aren't so much worried about the results as that they are decoded ...
+  (query "SELECT * FROM test_table")
+  (query "DROP DATABASE cl_mysql_test")
+  (disconnect))
+ 
+
