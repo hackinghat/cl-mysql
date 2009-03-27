@@ -1,7 +1,6 @@
 ;; $Id$
 
 (asdf:defsystem #:cl-mysql
-  :serial t
   :description "Common Lisp MySQL library bindings"
   :version "0.1"
   :author "Steve Knight <stkni@yahoo.com>"
@@ -11,7 +10,9 @@
 		    (describe
 		     (funcall
 		      (intern "TEST" :cl-mysql-test))))
-  :components ((:file "mysql"))
+  :serial t
+  :components ((:file "mysql"
+	       (:file "package"))
   :depends-on (#:cffi))
 
 (defmethod operation-done-p 

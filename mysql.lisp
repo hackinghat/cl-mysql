@@ -1,12 +1,5 @@
-(defpackage com.hackinghat.cl-mysql
-  (:use :cl)
-  (:nicknames "CL-MYSQL")
-  (:export #:connect #:query #:use #:disconnect #:ping #:option
-	   #:client-version #:server-version
-	   #:list-dbs #:list-tables #:list-processes #:list-fields))
-
-(in-package cl-mysql)
-
+;; $Id$
+;;
 (defpackage com.hackinghat.cl-mysql-system
   (:use :cl :cffi)
   (:nicknames "CL-MYSQL-SYSTEM")
