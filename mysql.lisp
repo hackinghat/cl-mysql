@@ -128,7 +128,7 @@
 
 ;; These special variables determine how the CFFI wrapping is done
 (eval-when (:compile-toplevel)
-  (defparameter *generate-alt-fns* t
+  (defparameter *generate-alt-fns* nil
     "Compile the library with this value equal to T to get the indirection 
    facility.   For more performance (because there is no wrapper around
    the CFFI wrapper!) set this value to NIL")
@@ -486,15 +486,16 @@
 		  (foreign-slot-value mref 'mysql-field 'flags))))))
 
 (defparameter *binary-types* (list :BIT :BINARY :VARBINARY))
-(defun extract-field (row field-index field-length field-type field-flag)
+(defun extract-field (row field-index field-length field-detail)
+  (declare (type fixnum field-index field-length))
   "Returns either a string or an unsigned byte array for known binary types. The
    designation of binary types per the C API seems a bit weird.   Basically,
    BIT, BINARY and VARBINARY are binary and so are BLOBs with the binary flag
    set.   It seems that other fields also have the binary flag set that are not
    binary and the BIT type, whilst binary doesn't have the flag set.   Bizarre-o."
-  (if (or (and (eq field-type :BLOB)
-	       (eq +field-binary+ (logand +field-binary+ field-flag)))
-	  (find field-type *binary-types*))
+  (if (or (and (eq (cadr field-detail)  :BLOB)
+	       (eq +field-binary+ (logand +field-binary+ (caddr field-detail))))
+	  (find (cadr field-detail) *binary-types*))
       (let ((arr (make-array field-length :element-type '(unsigned-byte 8)))
 	    (ptr (mem-aref row :pointer field-index)))
 	(loop for i from 0 to (1- field-length)
@@ -503,37 +504,36 @@
 	(values arr))
       (mem-aref row :string field-index)))
 
+;			       (fn (cdr (assoc type *type-map*)))
+;			       (raw (extract-field row i l
+;						   (elt field-names-and-types i))))
+;			  (if fn
+;			      (funcall fn raw l)
+;			      raw)))
+
+(defun process-row (mysql-res row num-fields field-names-and-types raw)
+  (declare (optimize (speed 3) (safety 0))
+	   (type fixnum num-fields)
+	   (ftype (function (t fixnum integer list) list) extract-field))
+  (let* ((mysql-lens (mysql-fetch-lengths mysql-res)))
+    (loop for i of-type fixnum from 0 to num-fields
+       for f of-type list in field-names-and-types
+       collect (extract-field row (the fixnum i) (the integer (mem-aref mysql-lens :int (the fixnum  i))) f)))) 
+
 (defun result-data (mysql-res raw field-names-and-types)
   "Internal function that processes a result set and returns all the data.
    If field-names-and-types is NIL the raw (string) data is returned"
-  (let ((num-fields (1- (mysql-num-fields mysql-res))))
+  (declare (optimize (speed 3))
+	   (ftype (function (t t fixnum list fixnum) list) process-row))
+  (let ((num-fields (mysql-num-fields mysql-res)))
     (loop for row = (mysql-fetch-row mysql-res)
-	  for len = (mysql-fetch-lengths mysql-res)
        until (null-pointer-p row)
-       collect (if (not raw)
-		   (loop
-		     for i from 0 to num-fields
-		     for f in field-names-and-types
-		     collect
-			(let* ((l (mem-aref len :int i))
-			      (type (second f))
-			      (flag (third f))
-			      (fn (cdr (assoc type *type-map*)))
-			      (raw (extract-field row i l type flag)))
-			   (if fn
-			       (funcall fn raw l)
-			       raw)))
-		   (loop
-		      for i from 0 to num-fields
-		      for f in field-names-and-types
-		      collect (extract-field row i
-					     (mem-aref len :int i)
-					     (second f)
-					     (third f)))))))
+       collect (process-row mysql-res row num-fields field-names-and-types raw))))
 
 (defun process-result-set (mysql-res &key raw database)
   "Result set will be NULL if the command did not return any results.   In this case we return a cons
    the rows affected."
+  (declare (optimize (speed 3)))
   (cond ((null-pointer-p mysql-res)
 	 (cons (mysql-affected-rows (or database (get-connection))) nil))
 	(t
@@ -549,7 +549,7 @@
   (with-connection (conn database)
     (error-if-non-zero conn (mysql-query conn query))
     (loop for result-set = (mysql-store-result conn)
-       collect (process-result-set result-set :database conn :raw raw)
+       nconc (list (process-result-set result-set :database conn :raw raw))
        until (progn
 	       (mysql-free-result result-set)
 	       (not (eq 0 (mysql-next-result conn)))))))
