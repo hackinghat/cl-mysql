@@ -8,6 +8,10 @@
    #:client-version #:server-version
    #:list-dbs #:list-tables #:list-processes #:list-fields
    ;; Constants
+   #:+client-compress+  #:+client-found-rows+    #:+client-ignore-sigpipe+
+   #:+client-ignore-space+  #:+client-interactive+ #:+client-local-files+
+   #:+client-multi-statements+  #:+client-multi-results+  #:+client-no-schema+
+   #:+client-ssl+  #:+client-remember-options+
    ;; Internal functions
    #:string-to-integer #:string-to-float
    #:string-to-date #:string-to-seconds #:string-to-universal-time
