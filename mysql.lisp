@@ -4,14 +4,24 @@
   (:use :cl :cffi)
   (:nicknames "CL-MYSQL-SYSTEM")
   (:export ;; Public functions
-           #:connect #:query #:use #:disconnect #:ping #:option
-       #:client-version #:server-version
-       #:list-dbs #:list-tables #:list-processes #:list-fields
-       ;; Constants
-       ;; Internal functions
-       #:string-to-integer #:string-to-float
-       #:string-to-date #:string-to-seconds #:string-to-universal-time
-       #:extract-field))
+   #:connect #:query #:use #:disconnect #:ping #:option
+   #:client-version #:server-version
+   #:list-dbs #:list-tables #:list-processes #:list-fields
+   ;; Constants
+   ;; Internal functions
+   #:string-to-integer #:string-to-float
+   #:string-to-date #:string-to-seconds #:string-to-universal-time
+   #:extract-field
+   ;; Options
+   #:opt-connect-timeout #:opt-compress #:opt-named-pipe
+   #:init-command #:read-default-file #:read-default-group
+   #:set-charset-dir #:set-charset-name #:opt-local-infile
+   #:opt-protocol #:shared-memory-base-name #:opt-read-timeout
+   #:opt-write-timeout #:opt-use-result
+   #:opt-use-remote-connection #:opt-use-embedded-connection
+   #:opt-guess-connection #:set-client-ip #:secure-auth
+   #:report-data-truncation #:opt-reconnect
+   #:opt-ssl-verify-server-cert))
 
 (in-package cl-mysql-system)
 
@@ -471,7 +481,8 @@
 ;;; High level API
 ;;;
 (defun use (name &key database)
-  "Equivalent to \"USE <name>\""
+  "Equivalent to running:
+   CL-USER> (query \"USE <name>\")"
   (with-connection (conn database)
     (error-if-non-zero conn (mysql-select-db conn name))
     (values)))
@@ -484,9 +495,11 @@
     (values (list major-version release-level version))))
 
 (defun client-version ()
+  "Returns a three part list containing the decoded client version information"
   (decode-version (mysql-get-client-version)))
 
 (defun server-version (&key database)
+  "Returns a three part list containing the decoded server version information"
   (with-connection (conn database)
     (decode-version (mysql-get-server-version conn))))
 
@@ -595,8 +608,29 @@
         (result-data mysql-res raw fields))))))
 
 (defun query (query &key raw database)
-  "Queries the connection.  Set raw to T if you don't want CL-MYSQL to decode
-   the return data (this will leave them as strings)"
+  "For a SELECT query or stored procedure that returns data, query will return 
+   a list of result sets.   Each result set will have 1 or more sublists 
+   where the first sublist contains the column names and the remaining lists 
+   represent the rows of the result set.  If the query does not return a result
+   set (for example if the query is an INSERT, UPDATE) the return value is the 
+   number of rows affected.    Because cl-mysql supports multiple-statements 
+   you can execute code like the following:
+
+    CL-MYSQL-SYSTEM> (query \"CREATE TABLE a(a INT); 
+                   INSERT INTO a (a) VALUES (1); DELETE FROM a; DROP TABLE a\")
+    ((0) (1) (1) (0))</code></pre>
+
+    The raw flag, if set will disable the translating of MySQL result values 
+    into CL types.   This might be useful for performance reasons, (cl-mysql 
+    is much faster when it doesn't need to translate types) but it also might 
+    be all you need.   Consider for instance if you're displaying a lot of 
+    numerics on a web-page.    If you do not need to convert the data into
+    floats/integers before displaying them on a page then raw could be useful 
+    here too.  Finally, <strong>cl-mysql</strong> attempts to convert all 
+    numeric types to their closest CL representation.   For very large numerics,
+    or numerics that have very high precision this might not be what you want.
+    In this case you could attempt to write your own conversion routine and 
+    inject it into cl-mysql.   More on this later."
   (with-connection (conn database)
     (error-if-non-zero conn (mysql-query conn query))
     (loop for result-set = (mysql-store-result conn)
@@ -607,6 +641,8 @@
            (not (eq 0 (mysql-next-result conn)))))))
 
 (defun ping (&key database)
+  "Check whether a connection is established or not.  If :opt-reconnect is 
+   set and there is no connection then MySQL's C API attempts a reconnection."
   (with-connection (conn database)
     (error-if-non-zero conn (mysql-ping conn))
     (values t)))
@@ -638,6 +674,7 @@
     (values mysql)))
 
 (defun disconnect (&key database)
+  "Unless database is supplied, disconnect will take the top element of the connection stack and close it."
   (with-connection (conn database)
     (mysql-close conn)))
 
@@ -661,6 +698,8 @@
     (values retval)))
 
 (defun option (option value &key database)
+  "Use this to set a client specific connection option.
+   CL-USER> (option :opt-reconnect 1)"
   (typecase value
     (string (%set-string-option option value :database database))
     (null   (%set-int-option option 0 :database database))
