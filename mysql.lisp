@@ -672,7 +672,7 @@
     (if (eql field-length 0)
 	(return-from extract-field nil))
     (if (or (and (eq field-type :BLOB)
-		 (logand +field-binary+ field-flag))
+		 (logtest +field-binary+ field-flag))
 	    (find field-type *binary-types*))
 	(let ((arr (make-array field-length :element-type '(unsigned-byte 8)))
 	      (ptr (mem-ref row :pointer field-index)))
@@ -784,7 +784,7 @@
 					     (or port 0)
 					     (or socket (null-pointer))
 					     (or (reduce #'logior (or client-flag '(0))))))
-    ;; To ensure proper string decoding between CL & MySQL we better set the connection to be UTF8 ...
+    ;; To ensure proper string decoding between CL & MySQL we better set the connection to be UTF-8 ...
     (add-connection mysql)
     (error-if-non-zero mysql (set-character-set "UTF8" :database mysql))
     (values mysql)))
