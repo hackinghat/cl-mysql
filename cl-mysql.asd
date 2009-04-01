@@ -15,7 +15,9 @@
 		     (funcall
 		      (intern "TEST-BASE" :cl-mysql-test))))
   :serial t
-  :components ((:file "mysql")
+  :components ((:file "system")
+	       (:file "pool")
+	       (:file "mysql")
 	       (:file "package"))
   :depends-on (#:cffi))
 
