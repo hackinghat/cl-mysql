@@ -1,4 +1,4 @@
- ;; $Id$
+;; $Id$
 ;;
 (defpackage com.hackinghat.cl-mysql-system
   (:use :cl :cffi)
@@ -10,7 +10,8 @@
        ;; Constants
        ;; Internal functions
        #:string-to-integer #:string-to-float
-       #:string-to-date #:string-to-seconds #:string-to-universal-time))
+       #:string-to-date #:string-to-seconds #:string-to-universal-time
+       #:extract-field))
 
 (in-package cl-mysql-system)
 
@@ -318,7 +319,7 @@
 ;;
 (defun string-to-integer (string &optional len)
   (declare (optimize (speed 3) (safety 3))
-	   (type (or null simple-string) string)
+       (type (or null simple-string) string)
        (type (or null (integer 0 128)) len))
   (when (and string (> (or len (length string)) 0))
     (parse-integer string :junk-allowed t)))
@@ -338,20 +339,21 @@
    that have 0 places after the decimal."
   (declare (optimize (speed 3) (safety 3))
        (type (simple-array (integer 0 9)) *char-to-int*)
+       (type fixnum len)
        (type (or null simple-string) string))
   (when (and string (> len 0))
     (let ((sign 1)
-	  (integer-part 0)
-	  (decimal-part 0)
-	  (mantissa-part 0)
-	  (decimal-length 1)
-	  (mantissa-sign 1)
-	  (passed-decimal nil)
-	  (passed-mantissa nil))
+      (integer-part 0)
+      (decimal-part 0)
+      (mantissa-part 0)
+      (decimal-length 1)
+      (mantissa-sign 1)
+      (passed-decimal nil)
+      (passed-mantissa nil))
       (declare (type integer integer-part decimal-part)
-	       (type (integer 0 310) mantissa-part)
-	       (type (integer -1 1) mantissa-sign sign)
-	       (type (or null t) passed-decimal passed-mantissa))
+           (type (integer 0 310) mantissa-part)
+           (type (integer -1 1) mantissa-sign sign)
+           (type (or null t) passed-decimal passed-mantissa))
       (loop for c across string
 	 do (cond ((char= c #\-) (if passed-mantissa
 				     (setq mantissa-sign -1)
@@ -362,12 +364,12 @@
 		  (passed-decimal (setq decimal-part (+ (* decimal-part 10) (elt *char-to-int* (char-code c)))
 					decimal-length (* 10 decimal-length)))
 		  (t (setq integer-part (+ (* integer-part 10) (elt *char-to-int* (char-code c)))))))
-      (format t "~D ~D ~D ~D ~D ~D~%" sign integer-part decimal-part decimal-length mantissa-sign mantissa-part)
+					;(format t "~D ~D ~D ~D ~D ~D~%" sign integer-part decimal-part decimal-length mantissa-sign mantissa-part)
       (coerce (* sign (+ integer-part (/ decimal-part decimal-length)) (expt 10 (* mantissa-sign mantissa-part))) 'double-float))))
                   
 (defun string-to-date (string &optional len)
   (declare (optimize (speed 3) (safety 3))
-           (type simple-string string)
+           (type (or null simple-string) string)
            (type (or null fixnum) len))
   (when (and string (> (or len (length string)) 9))
     (let ((y (parse-integer string :start 0 :end 4))
@@ -379,7 +381,7 @@
   "Fairly ugly function to turn MySQL TIME duration into an integer representation.
    It's complicated because of ... well, read this:  http://dev.mysql.com/doc/refman/5.0/en/time.html"
   (declare (optimize (speed 3) (safety 3))
-           (type simple-string string)
+           (type (or null simple-string) string)
            (type (or null fixnum) len))
   (when string
     (let* ((strlen (or len (length string)))
@@ -390,7 +392,7 @@
            (m (parse-integer string :start (+ 3 offset) :end (+ 5 offset)))
            (s (parse-integer string :start (+ 6 offset) :end (+ 8 offset)))
            (time (+ (* h 3600) (* m 60) s)))
-      (declare (type (integer 0 824) h)
+      (declare (type (integer 0 839) h)
            (type (integer 0 59) m s))
       (if (eq start 1)
           (values (* -1 time))
@@ -398,7 +400,7 @@
 
 (defun string-to-universal-time (string &optional len)
   (declare (optimize (speed 3) (safety 3))
-           (type simple-string string)
+           (type (or null simple-string) string)
            (type (or null fixnum) len))
   (when (and string (> (or len (length string)) 0))
     (+ (string-to-date (subseq string 0 10))
@@ -524,8 +526,9 @@
            (foreign-slot-value mref 'mysql-field 'type))
           (foreign-slot-value mref 'mysql-field 'flags))))))
 
-(defparameter *binary-types* #(:BIT :BINARY :VARBINARY))
-(defun extract-field (row field-index field-length field-detail)
+(defparameter *binary-types* #(:BIT :BINARY :VARBINARY :GEOMETRY))
+(declaim (inline extract-field process-row))
+(defun extract-field (row field-index field-length raw field-detail)
   "Returns either a string or an unsigned byte array for known binary types. The
    designation of binary types per the C API seems a bit weird.   Basically,
    BIT, BINARY and VARBINARY are binary and so are BLOBs with the binary flag
@@ -536,31 +539,37 @@
              (optimize (speed 3) (safety 3))
          (type (integer 0 65536) field-index field-flag)
          (type (integer 0 4294967296) field-length )
-             (type (simple-array symbol)  *binary-types*))
-  (if (or (and (eq field-type :BLOB)
-           (eq +field-binary+ (logand +field-binary+ field-flag)))
-      (find field-type *binary-types*))
-      (let ((arr (make-array field-length :element-type '(unsigned-byte 8)))
-        (ptr (mem-ref row :pointer field-index)))
-    (loop for i from 0 to (1- field-length)
-       do (setf (elt arr i) (mem-ref ptr :unsigned-char i)))
-    (values arr))
-      (let ((fn (cdr (assoc field-type *type-map*))))
-      (if fn
-          (funcall fn (mem-ref row :string field-index) field-length)
-          (mem-ref row :string field-index))))))
+	 (type (simple-array symbol)  *binary-types*))
+    (if (eql field-length 0)
+	(return-from extract-field (values nil)))
+    (if
+     (or (and (eq field-type :BLOB)
+	       (eq +field-binary+ (logand +field-binary+ field-flag)))
+	 (find field-type *binary-types*))
+     (let ((arr (make-array field-length :element-type '(unsigned-byte 8)))
+	   (ptr (mem-ref row :pointer field-index)))
+       (loop for i from 0 to (1- field-length)
+	  do (setf (elt arr i) (mem-ref ptr :unsigned-char i)))
+	(values  arr))
+     (if raw
+	 (mem-ref row :string field-index)
+	 (let ((fn (cdr (assoc field-type *type-map*))))
+	   (declare (type (or null function) fn))
+	   (values (if (and (not raw) fn)
+		       (funcall fn (mem-ref row :string field-index) field-length)
+		       (mem-ref row :string field-index))))))))
 
 (defun process-row (mysql-res row num-fields field-names-and-types raw)
   (declare (optimize (speed 3) (safety 3))
        (type (integer 0 65536) num-fields)
-       (ftype (function (t fixnum integer list) list) extract-field))
+       (ftype (function (t fixnum (integer 0 4294967296)  (or t null) list) (or null simple-array simple-string)) extract-field))
   (let* ((mysql-lens (mysql-fetch-lengths mysql-res))
          (int-size (foreign-type-size :int)))
-        (declare (type (integer 0 16) int-size))
+    (declare (type (integer 0 16) int-size))
     (loop for i of-type fixnum from 0 to (* num-fields int-size) by int-size
        for f of-type list in field-names-and-types
        collect (extract-field row i
-                  (mem-ref mysql-lens :unsigned-long i) f))))
+			      (mem-ref mysql-lens :unsigned-long i) raw f))))
 
 (defun result-data (mysql-res raw field-names-and-types)
   "Internal function that processes a result set and returns all the data.
@@ -591,7 +600,8 @@
   (with-connection (conn database)
     (error-if-non-zero conn (mysql-query conn query))
     (loop for result-set = (mysql-store-result conn)
-       nconc (list (process-result-set result-set :database conn :raw raw))
+       nconc (list (unwind-protect
+			(process-result-set result-set :database conn :raw raw)))
        until (progn
            (mysql-free-result result-set)
            (not (eq 0 (mysql-next-result conn)))))))
@@ -605,7 +615,16 @@
         (client-flag (list +client-compress+
                    +client-multi-statements+
                    +client-multi-results+)))
-  "By default we turn on CLIENT_COMPRESS, CLIENT_MULTI_STATEMENTS and CLIENT_MULTI_RESULTS."
+  "Connect will present to MySQL sensible defaults for all the connection items.    
+   The following code will attach you to a MySQL instance running on localhost, 
+   as the current user with no password.   It will automatically turn on compression 
+   between client-and-server and also enable multiple-result sets if possible.
+
+   CL-USER> (connect)
+
+   If unsuccesful connect will raise a SIMPLE-ERROR, otherwise it will place the 
+   connection into a stack.   This value will be used in all subsequent operations 
+   where the :database key argument is omitted."
   (let* ((mysql (mysql-init (null-pointer))))
     (error-if-null mysql (mysql-real-connect mysql
                          (or host "localhost")
@@ -646,5 +665,6 @@
     (string (%set-string-option option value :database database))
     (null   (%set-int-option option 0 :database database))
     (t      (%set-int-option option value :database database))))
+
 
 

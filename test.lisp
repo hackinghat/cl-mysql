@@ -24,7 +24,7 @@
   (is (eql 12345678.123d0 (string-to-float "12345678.123" 1)))
   (is (eql 2.356d0 (string-to-float "2.356" 1)))
   (is (eql 12345678d0 (string-to-float "12345678" 1)))
-  (is (eql 1.23456789012345678d308 (string-to-float "1.23456789012345678d308e+308" 1))))
+  (is (eql 1.23456789012345678d308 (string-to-float "1.23456789012345678e+308" 1))))
 
 (deftest test-string-to-date ()
   (is (eq nil (string-to-date nil)))
@@ -42,6 +42,18 @@
   (is (eq -3601 (string-to-seconds "-01:00:01")))
   (is (eq 3023999 (string-to-seconds "839:59:59")))
   (is (eq -3023999 (string-to-seconds "-839:59:59"))))
+
+(deftest test-extract-field ()
+  (cffi:with-foreign-object (ptr :pointer)
+    (cffi:with-foreign-object (int :int)
+      (setf (cffi:mem-ref int :int) (char-code #\1))
+      (setf (cffi:mem-ref ptr :pointer) int)
+      (is (string= "1" (extract-field ptr 0 1 nil '("one" :VARCHAR 0))))
+      (is (equalp (make-array 1 :initial-element (char-code #\1))
+		  (extract-field ptr 0 1 nil '("bit" :BIT 0)))))
+      (setf (cffi:mem-ref ptr :pointer) (cffi:null-pointer))
+      (is (null (extract-field ptr 0 0 nil '("space" :VARCHAR 0))))
+      (is (null (extract-field ptr 0 0 nil '("bit" :BIT 0))))))
 
 (deftest test-string-to-universal-time ()
   (is (eq nil (string-to-universal-time nil)))
