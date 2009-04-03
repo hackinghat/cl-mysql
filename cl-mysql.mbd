@@ -1,0 +1,12 @@
+(in-package :sysdef-user)
+
+(define-system :cl-mysql  ()
+  (:author "Steve Knight <stkni@yahoo.com>")
+  (:version 0 1)
+  (:licence "LLGPL")
+  (:documentation "Common Lisp MySQL library bindings")
+  (:serial t)
+  (:components
+   "mysql"
+   "package")
+  (:needs :cffi))

@@ -12,6 +12,7 @@
    #:connect #:query #:use #:disconnect #:ping #:option
    #:client-version #:server-version
    #:list-dbs #:list-tables #:list-processes #:list-fields
+   #:escape-string
    ;; Constants
    #:+client-compress+  #:+client-found-rows+    #:+client-ignore-sigpipe+
    #:+client-ignore-space+  #:+client-interactive+ #:+client-local-files+
@@ -226,6 +227,17 @@
 (defmysqlfun ("mysql_query" mysql-query) :int
   (mysql :pointer)
   (statement :string))
+
+(defmysqlfun ("mysql_real_escape_string" mysql-real-escape-string) :unsigned-long
+  (mysql :pointer)
+  (to    :string)
+  (from  :string)
+  (length :unsigned-int))
+
+(defmysqlfun ("mysql_escape_string" mysql-escape-string) :unsigned-long
+  (to    :string)
+  (from  :string)
+  (length :unsigned-int))
 
 (defmysqlfun ("mysql_field_count" mysql-field-count) :unsigned-int
   (mysql :pointer))
@@ -481,6 +493,12 @@
                      (mysql-error-message condition)
 		     (mysql-error-errno condition)))))
 
+(define-condition cl-mysql-error (error)
+                  ((message :initarg :message :reader cl-mysql-error-message))
+  (:report (lambda (condition stream)
+             (format stream "cl-mysql error: \"~A\""
+                     (cl-mysql-error-message condition)))))
+
 (defun error-if-non-zero (database return-value)
   (if (not (eql 0 return-value))
       (error 'mysql-error
@@ -497,17 +515,21 @@
 
 ;;; Connections
 ;;;
-(defparameter *connection-stack* nil)
+(defvar *connection-stack* nil)
 
 (defun add-connection (mysql)
   "Adds a connection to the pool"
   (push mysql *connection-stack*))
 
-(defun get-connection ()
+(defun get-connection (&optional no-error)
   "Adds a connection to the pool"
-  (unless *connection-stack*
-    (error "There are no connections established!"))
-  (car *connection-stack*))
+  (cond ((or (null *connection-stack*)
+	     (= 0 (length *connection-stack*)))
+	 (if no-error
+	     (values nil)
+	     (error 'cl-mysql-error
+		    :message "There are no connections established!")))
+	(t (car *connection-stack*))))
 
 (defun drop-connection ()
   (pop *connection-stack*))
@@ -665,7 +687,7 @@
     numeric types to their closest CL representation.   For very large numerics,
     or numerics that have very high precision this might not be what you want.
     In this case you could attempt to write your own conversion routine and 
-    inject it into cl-mysql through the type-map.  More on this later ..."
+    inject it into cl-mysql through the type-map."
   (with-connection (conn database)
     (error-if-non-zero conn (mysql-query conn query))
     (loop for result-set = (mysql-store-result conn)
@@ -712,7 +734,10 @@
 (defun disconnect (&key database)
   "Unless database is supplied, disconnect will take the top element of the connection stack and close it."
   (with-connection (conn database)
-    (mysql-close conn)))
+    (mysql-close conn)
+    (setf *connection-stack*
+	  (remove-if (lambda (x)
+		       (equalp conn x)) *connection-stack*))))
 
 (defun %set-string-option (option value &key database)
   (let ((retval 0))
@@ -742,4 +767,16 @@
     (t      (%set-int-option option value :database database))))
 
 
-
+(defun escape-string (from-string &key database)
+  "Given a string, encode it appropriately"
+  (with-connection (conn database)
+    (let* ((to-length (+ (* (length from-string) 2) 1))
+	   (to-string (foreign-alloc :char :count to-length))
+	   (return-string nil))
+      (unwind-protect (progn
+			(mysql-real-escape-string conn to-string from-string to-length)
+			(setf return-string (foreign-string-to-lisp to-string))
+			(foreign-free to-string))
+	(foreign-free to-string))
+      (values return-string))))
+    
