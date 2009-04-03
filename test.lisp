@@ -1,14 +1,16 @@
-;; $Id:
-
+;;;; -*- Mode: Lisp -*-
+;;;; $Id$
+;;;; Author: Steve Knight <stknig@gmail.com>
+;;;;
 (defpackage com.hackinghat.cl-mysql-test
   (:nicknames "CL-MYSQL-TEST")
   (:use :cl :stefil :cl-mysql-system))
 
-(in-package :cl-mysql-test)
+(in-package "CL-MYSQL-TEST")
 
 (in-root-suite)
 
-(defsuite* test)
+(defsuite* test-base)
 
 (deftest test-string-to-integer ()
   (is (eq nil (string-to-integer "" 0)))
@@ -24,14 +26,15 @@
   (is (eql 12345678.123d0 (string-to-float "12345678.123" 1)))
   (is (eql 2.356d0 (string-to-float "2.356" 1)))
   (is (eql 12345678d0 (string-to-float "12345678" 1)))
-  (is (eql 1.23456789012345678d308 (string-to-float "1.23456789012345678e+308" 1))))
+  (is (eql 1.23456789012345678d308 (string-to-float "1.23456789012345678e+308" 1)))
+  (is (eql 1.23456789012345678d-308 (string-to-float "1.23456789012345678e-308" 1))))
 
 (deftest test-string-to-date ()
   (is (eq nil (string-to-date nil)))
   (is (eq nil (string-to-date "")))
   (multiple-value-bind (h m s day mon year)
       (decode-universal-time (string-to-date "2009-01-01"))
-    (is (and (eq 0 h) (eq 0 m) (eq 0 s) (eq 1 day) (eq 1 mon) (eq 2009 year))))
+    (is (and (eql 0 h) (eql 0 m) (eql 0 s) (eql 1 day) (eql 1 mon) (eql 2009 year))))
   ;; Not sure how much it is worth investing in testing MySQL return values
   (is (eq nil (string-to-date "2009-1-1"))))
 
@@ -39,9 +42,9 @@
   (is (eq nil (string-to-seconds nil)))
   (is (eq nil (string-to-seconds "")))
   (is (eq -1  (string-to-seconds "-00:00:01")))
-  (is (eq -3601 (string-to-seconds "-01:00:01")))
-  (is (eq 3023999 (string-to-seconds "839:59:59")))
-  (is (eq -3023999 (string-to-seconds "-839:59:59"))))
+  (is (eql -3601 (string-to-seconds "-01:00:01")))
+  (is (eql 3023999 (string-to-seconds "839:59:59")))
+  (is (eql -3023999 (string-to-seconds "-839:59:59"))))
 
 (deftest test-extract-field ()
   (cffi:with-foreign-object (ptr :pointer)
@@ -58,10 +61,22 @@
 (deftest test-string-to-universal-time ()
   (is (eq nil (string-to-universal-time nil)))
   (is (eq nil (string-to-universal-time "")))
-  (is (eq 1
+  (is (eql 1
 	  (- (string-to-universal-time "2009-01-01 00:00:00")
 	     (string-to-universal-time "2008-12-31 23:59:59")))))
 
+
+(deftest test-string-to-ratio  ()
+  (is (eq nil (string-to-ratio nil 1)))
+  (is (eq nil (string-to-ratio "" 0)))
+  (is (equal (/ 123123123 100000000)
+	     (string-to-ratio "1.23123123" 1)))
+  (is (equal -1.23123123d0 
+	     (coerce (string-to-ratio "-1.23123123" 1) 'double-float)))
+  (is (eql 99999 (string-to-ratio "99999" 1)))
+  (is (eql (/ 1 10) (string-to-ratio "0.1" 1))))
+  
+(in-root-suite)
 
 (defsuite* test-with-connection)
 

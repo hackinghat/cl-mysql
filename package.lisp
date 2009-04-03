@@ -1,5 +1,7 @@
-;; $Id$
-;;
+;;;; -*- Mode: Lisp -*-
+;;;; $Id$
+;;;; Author: Steve Knight <stknig@gmail.com>
+;;;;
 (defpackage com.hackinghat.cl-mysql
   (:use :cl)
   (:nicknames "CL-MYSQL")

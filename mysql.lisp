@@ -1,9 +1,14 @@
-;; $Id$
-;;
+;;;; -*- Mode: Lisp -*-
+;;;; $Id$
+;;;; Author: Steve Knight <stknig@gmail.com>
+;;;;
 (defpackage com.hackinghat.cl-mysql-system
   (:use :cl :cffi)
   (:nicknames "CL-MYSQL-SYSTEM")
-  (:export ;; Public functions
+  (:export
+   ;; Special vairalbes
+   #:*type-map*
+   ;; Public functions
    #:connect #:query #:use #:disconnect #:ping #:option
    #:client-version #:server-version
    #:list-dbs #:list-tables #:list-processes #:list-fields
@@ -15,8 +20,8 @@
    ;; Internal functions
    #:string-to-integer #:string-to-float
    #:string-to-date #:string-to-seconds #:string-to-universal-time
-   #:extract-field
-   ;; Options
+   #:string-to-ratio #:extract-field
+   ;; Enum Options
    #:opt-connect-timeout #:opt-compress #:opt-named-pipe
    #:init-command #:read-default-file #:read-default-group
    #:set-charset-dir #:set-charset-name #:opt-local-infile
@@ -27,15 +32,15 @@
    #:report-data-truncation #:opt-reconnect
    #:opt-ssl-verify-server-cert))
 
-(in-package cl-mysql-system)
+(in-package "CL-MYSQL-SYSTEM")
 
 (define-foreign-library libmysqlclient
   (t (:default "libmysqlclient_r")))
 
 (use-foreign-library libmysqlclient)
 
-;;
-;; Client options
+;;; Client options
+;;;
 (defconstant +client-compress+ 32)
 (defconstant +client-found-rows+ 2)
 (defconstant +client-ignore-sigpipe+ 4096)
@@ -48,8 +53,8 @@
 (defconstant +client-ssl+ (ash 1 11))
 (defconstant +client-remember-options+ (ash 1 31))
 
-;;
-;; Field flags
+;;; Field flags
+;;;
 (defconstant +field-not-null+ 1
   "Field can't be null")
 (defconstant +field-primary-key+ 2
@@ -78,10 +83,9 @@
   "Field doesn't have a default value")
 (defconstant +field-num+ 32768
   "Field is num")
-;;
-;;
-;; Error codes
-;;
+
+;;; Error codes
+;;;
 (defconstant +commands-out-of-sync+ 2014)
 (defconstant +error-first+ 2000)
 (defconstant +unknown-error+ 2000)
@@ -141,7 +145,6 @@
 (defconstant +not-implemented+ 2054)
 (defconstant +server-lost-extended+ 2055)
 
-;; These special variables determine how the CFFI wrapping is done
 (eval-when (:compile-toplevel)
   (defparameter *generate-alt-fns* nil
     "Compile the library with this value equal to T to get the indirection
@@ -169,25 +172,25 @@
    CL-USER> (disconnect)
    Closing!"
   (let* ((n name)
-     (int-name internal-name)
-     (int-libname (intern (string-upcase
-                (format nil "lib~A" int-name))))
-     (docstring (format nil "Library wrapper for MySQL function: ~A" name))
-     (mysql-doc-ref (format nil *mysql-dev-api-url* (string-downcase  int-name)))
-     (arg-names (mapcar #'car args)))
+	 (int-name internal-name)
+	 (int-libname (intern (string-upcase
+			       (format nil "lib~A" int-name))))
+	 (docstring (format nil "Library wrapper for MySQL function: ~A" name))
+	 (mysql-doc-ref (format nil *mysql-dev-api-url* (string-downcase  int-name)))
+	 (arg-names (mapcar #'car args)))
     (if *generate-alt-fns*
-    `(progn  (defcfun (,n ,int-libname) ,return-type
-           ,mysql-doc-ref
-           ,@args)
-         (defun ,int-name ,arg-names
-           ,docstring
-           (let ((alt-fn (get ',int-name 'alt-fn)))
-             (if alt-fn
-             (funcall alt-fn ,@arg-names)
-             (,int-libname ,@arg-names)))))
-    `(defcfun (,n ,int-name) ,return-type
-       ,mysql-doc-ref
-       ,@args))))
+	`(progn  (defcfun (,n ,int-libname) ,return-type
+		   ,mysql-doc-ref
+		   ,@args)
+		 (defun ,int-name ,arg-names
+		   ,docstring
+		   (let ((alt-fn (get ',int-name 'alt-fn)))
+		     (if alt-fn
+			 (funcall alt-fn ,@arg-names)
+			 (,int-libname ,@arg-names)))))
+	`(defcfun (,n ,int-name) ,return-type
+	   ,mysql-doc-ref
+	   ,@args))))
  
 (defmysqlfun ("mysql_init" mysql-init) :pointer
   (mysql :pointer))
@@ -328,67 +331,91 @@
   (charsetnr :unsigned-int)
   (type :int))
 
-;;
-;; Decoders
-;;
+;;; Decoders
+;;;
 (defun string-to-integer (string &optional len)
   (declare (optimize (speed 3) (safety 3))
-       (type (or null simple-string) string)
-       (type (or null (integer 0 128)) len))
+	   (type (or null simple-string) string)
+	   (type (or null (integer 0 128)) len))
   (when (and string (> (or len (length string)) 0))
     (parse-integer string :junk-allowed t)))
 
-(defparameter *base-10-chars* #(#\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7 #\8 #\9))
-(defparameter *base-10-nums*  #(0 1 2 3 4 5 6 7 8 9))
-(defparameter *max-char-code* (1+ (loop for c across *base-10-chars* maximizing (char-code c))))
-(defparameter *char-to-int*   (make-array *max-char-code* :element-type '(integer 0 9)))
-
-(eval-when (:load-toplevel)
-  (loop for c across *base-10-chars*
-       for n across *base-10-nums*
-       do (setf (elt *char-to-int* (char-code c)) n)))
- 
 (defun string-to-float (string len)
   "Convert a MySQL float representation into a double.   Note that we could do better on DECIMAL/NUMERICs
    that have 0 places after the decimal."
   (declare (optimize (speed 3) (safety 3))
-       (type (simple-array (integer 0 9)) *char-to-int*)
-       (type fixnum len)
-       (type (or null simple-string) string))
+	   (type fixnum len)
+	   (type (or null simple-string) string))
   (when (and string (> len 0))
     (let ((sign 1)
-      (integer-part 0)
-      (decimal-part 0)
-      (mantissa-part 0)
-      (decimal-length 1)
-      (mantissa-sign 1)
-      (passed-decimal nil)
-      (passed-mantissa nil))
+	  (integer-part 0)
+	  (decimal-part 0)
+	  (mantissa-part 0)
+	  (decimal-length 1)
+	  (mantissa-sign 1)
+	  (passed-decimal nil)
+	  (passed-mantissa nil))
       (declare (type integer integer-part decimal-part)
-           (type (integer 0 310) mantissa-part)
-           (type (integer -1 1) mantissa-sign sign)
-           (type (or null t) passed-decimal passed-mantissa))
+	       (type (integer 0 310) mantissa-part)
+	       (type (integer -1 1) mantissa-sign sign)
+	       (type (or null t) passed-decimal passed-mantissa))
       (loop for c across string
-	 do (cond ((char= c #\-) (if passed-mantissa
-				     (setq mantissa-sign -1)
-				     (setq sign -1)))
-		  ((char= c #\.) (setq passed-decimal t))
-		  ((char= c #\e) (setq passed-mantissa t))
-		  (passed-mantissa (setq mantissa-part (+ (* mantissa-part 10) (elt *char-to-int* (char-code c)))))
-		  (passed-decimal (setq decimal-part (+ (* decimal-part 10) (elt *char-to-int* (char-code c)))
-					decimal-length (* 10 decimal-length)))
-		  (t (setq integer-part (+ (* integer-part 10) (elt *char-to-int* (char-code c)))))))
-					;(format t "~D ~D ~D ~D ~D ~D~%" sign integer-part decimal-part decimal-length mantissa-sign mantissa-part)
+	 do (cond ((char= c #\+)
+		   (if passed-mantissa
+		       (setf mantissa-sign 1)
+		       (setf sign 1)))
+		  ((char= c #\-)
+		   (if passed-mantissa
+		       (setf mantissa-sign -1)
+		       (setf sign -1)))
+		  ((char= c #\.)
+		   (setf passed-decimal t))
+		  ((char= c #\e)
+		   (setf passed-mantissa t))
+		  (passed-mantissa
+		   (setf mantissa-part
+			 (+ (* mantissa-part 10)
+			    (digit-char-p c))))
+		  (passed-decimal
+		   (setf decimal-part
+			 (+ (* decimal-part 10)
+			    (digit-char-p c))
+			 decimal-length
+			 (* 10 decimal-length)))
+		  (t
+		   (setf integer-part
+			 (+ (* integer-part 10)
+			    (digit-char-p c))))))
       (coerce (* sign (+ integer-part (/ decimal-part decimal-length)) (expt 10 (* mantissa-sign mantissa-part))) 'double-float))))
-                  
+
+(defun string-to-ratio (string len)
+  (when (and string (> (or len (length string)) 0))
+    (let ((numerator 0)
+	  (denominator 1)
+	  (passed-decimal nil)
+	  (sign 1))
+      (declare (type integer numerator denominator))
+      (loop for c across string
+	 do (progn
+	      (cond ((eq c #\.)
+		     (setf passed-decimal t)t)
+		    ((eq c #\-)
+		     (setf sign (* -1 sign)))
+		    (t
+		     (when  passed-decimal
+		       (setf denominator (* denominator 10)))
+		     (setf numerator
+			   (+ (digit-char-p c) (* numerator 10)))))))
+      (* sign (/ numerator denominator)))))
+
 (defun string-to-date (string &optional len)
   (declare (optimize (speed 3) (safety 3))
            (type (or null simple-string) string)
            (type (or null fixnum) len))
   (when (and string (> (or len (length string)) 9))
     (let ((y (parse-integer string :start 0 :end 4))
-      (m (parse-integer string :start 5 :end 7))
-      (d (parse-integer string :start 8 :end 10)))
+	  (m (parse-integer string :start 5 :end 7))
+	  (d (parse-integer string :start 8 :end 10)))
       (encode-universal-time 0 0 0 d m y))))
 
 (defun string-to-seconds (string &optional len)
@@ -399,18 +426,18 @@
            (type (or null fixnum) len))
   (when string
     (let* ((strlen (or len (length string)))
-       (offset (- strlen 8)))
+	   (offset (- strlen 8)))
       (when (and (>= offset 0) (< offset 3))
-    (let* ((start (if (eq #\- (elt string 0)) 1 0))
-           (h (parse-integer string :start start :end (+ 2 offset)))
-           (m (parse-integer string :start (+ 3 offset) :end (+ 5 offset)))
-           (s (parse-integer string :start (+ 6 offset) :end (+ 8 offset)))
-           (time (+ (* h 3600) (* m 60) s)))
-      (declare (type (integer 0 839) h)
-           (type (integer 0 59) m s))
-      (if (eq start 1)
-          (values (* -1 time))
-          (values time)))))))
+	(let* ((start (if (eql #\- (elt string 0)) 1 0))
+	       (h (parse-integer string :start start :end (+ 2 offset)))
+	       (m (parse-integer string :start (+ 3 offset) :end (+ 5 offset)))
+	       (s (parse-integer string :start (+ 6 offset) :end (+ 8 offset)))
+	       (time (+ (* h 3600) (* m 60) s)))
+	  (declare (type (integer 0 839) h)
+		   (type (integer 0 59) m s))
+	  (if (eql start 1)
+	      (* -1 time)
+	      time))))))
 
 (defun string-to-universal-time (string &optional len)
   (declare (optimize (speed 3) (safety 3))
@@ -420,46 +447,54 @@
     (+ (string-to-date (subseq string 0 10))
        (string-to-seconds (subseq string 11)))))
 
-(defparameter *type-map*
-  `((:DECIMAL . ,#'string-to-float)
-    (:TINY . ,#'string-to-integer)
-    (:SHORT . ,#'string-to-integer)
-    (:LONG . ,#'string-to-integer)
-    (:FLOAT . ,#'string-to-float)
-    (:DOUBLE . ,#'string-to-float)
-    (:NULL . ,(lambda (string)
-              (declare (ignore string))
-              (values nil)))
-    (:TIMESTAMP . ,#'string-to-universal-time)
-    (:LONGLONG . ,#'string-to-integer)
-    (:INT24 . ,#'string-to-integer)
-    (:DATE . ,#'string-to-date)
-    (:TIME . ,#'string-to-seconds)
-    (:DATETIME . ,#'string-to-universal-time)
-    (:YEAR . ,#'string-to-integer)
-    (:NEWDATE . ,#'string-to-universal-time)
-    (:NEWDECIMAL . ,#'string-to-float)))
+(defparameter *type-map* (make-hash-table))
 
-;;;
+(eval-when (:load-toplevel)
+  (mapcar (lambda (map)
+	    (setf (gethash (first map) *type-map*) (second map)))
+	  '((:DECIMAL  string-to-ratio)
+	    (:TINY  string-to-integer)
+	    (:SHORT  string-to-integer)
+	    (:LONG  string-to-integer)
+	    (:FLOAT  string-to-float)
+	    (:DOUBLE  string-to-float)
+	    (:NULL  (lambda (string)
+		      (declare (ignore string))
+		      nil))
+	    (:TIMESTAMP  string-to-universal-time)
+	    (:LONGLONG string-to-integer)
+	    (:INT24  string-to-integer)
+	    (:DATE  string-to-date)
+	    (:TIME  string-to-seconds)
+	    (:DATETIME  string-to-universal-time)
+	    (:YEAR  string-to-integer)
+	    (:NEWDATE  string-to-universal-time)
+	    (:NEWDECIMAL  string-to-ratio))))
+
 ;;; Error handling
 ;;;
-(defmacro error-if-non-zero (database &body command)
-  `(let ((return-value ,@command))
-     (if (not (eq 0 return-value))
-     (error (format nil "MySQL error: \"~A\" (errno = ~D)."
-            (mysql-error ,database)
-            (mysql-errno ,database)))
-     return-value)))
+(define-condition mysql-error (error)
+                  ((message :initarg :message :reader mysql-error-message)
+		   (errno :initarg :errno :reader mysql-error-errno))
+  (:report (lambda (condition stream)
+             (format stream "MySQL error: \"~A\" (errno = ~D)."
+                     (mysql-error-message condition)
+		     (mysql-error-errno condition)))))
 
-(defmacro error-if-null (database &body command)
-  `(let ((return-value ,@command))
-     (if (null-pointer-p return-value)
-     (error (format nil "MySQL error: \"~A\" (errno = ~D)."
-            (mysql-error ,database)
-            (mysql-errno ,database)))
-     return-value)))
+(defun error-if-non-zero (database return-value)
+  (if (not (eql 0 return-value))
+      (error 'mysql-error
+	     :message (mysql-error database)
+	     :errno (mysql-errno database)))
+  return-value)
 
-;;;
+(defun error-if-null (database return-value)
+  (if (null-pointer-p return-value)
+      (error 'mysql-error 
+	     :message (mysql-error database)
+	     :error (mysql-errno database)))
+  return-value)
+
 ;;; Connections
 ;;;
 (defparameter *connection-stack* nil)
@@ -481,7 +516,6 @@
   `(let ((,var (or ,database (get-connection))))
      ,@body))
 
-;;;
 ;;; High level API
 ;;;
 (defun use (name &key database)
@@ -494,9 +528,9 @@
 (defun decode-version (int-version)
   "Return a list of version details <major> <release> <version>"
   (let* ((version (mod int-version 100))
-     (major-version (floor int-version 10000))
-     (release-level (mod (floor int-version 100) 10)))
-    (values (list major-version release-level version))))
+	 (major-version (floor int-version 10000))
+	 (release-level (mod (floor int-version 100) 10)))
+    (list major-version release-level version)))
 
 (defun client-version ()
   "Returns a three part list containing the decoded client version information"
@@ -510,42 +544,41 @@
 (defun list-dbs (&key database)
   (with-connection (conn database)
     (let ((result (error-if-null conn (mysql-list-dbs conn (null-pointer)))))
-      (process-result-set result :database conn))))
+      (process-result-set result *type-map* conn))))
 
 (defun list-tables (&key database)
   (with-connection (conn database)
     (let ((result (error-if-null conn (mysql-list-tables conn (null-pointer)))))
-      (process-result-set result :database conn))))
+      (process-result-set result *type-map* conn))))
 
 (defun list-fields (table &key database)
   (with-connection (conn database)
     (let ((result (error-if-null conn (mysql-list-fields conn table (null-pointer)))))
-      (process-result-set result :database conn))))
+      (process-result-set result *type-map* conn))))
 
 (defun list-processes (&key database)
   (with-connection (conn database)
     (let ((result (error-if-null conn (mysql-list-processes conn))))
-      (process-result-set result :database conn))))
+      (process-result-set result *type-map* conn))))
 
-;;
 ;; Result set functions
 ;;
 (defun field-names-and-types (mysql-res)
   "Retrieve from a MYSQL_RES a list of cons ((<field name> <field type>)*) "
   (let ((num-fields (1- (mysql-num-fields mysql-res)))
-    (fields (mysql-fetch-fields mysql-res)))
+	(fields (mysql-fetch-fields mysql-res)))
     (loop for i from 0 to num-fields
        collect (let ((mref (mem-aref fields 'mysql-field i)))
-         (list
-          (foreign-slot-value mref 'mysql-field 'name)
-          (foreign-enum-keyword
-           'enum-field-types
-           (foreign-slot-value mref 'mysql-field 'type))
-          (foreign-slot-value mref 'mysql-field 'flags))))))
+		 (list
+		  (foreign-slot-value mref 'mysql-field 'name)
+		  (foreign-enum-keyword
+		   'enum-field-types
+		   (foreign-slot-value mref 'mysql-field 'type))
+		  (foreign-slot-value mref 'mysql-field 'flags))))))
 
 (defparameter *binary-types* #(:BIT :BINARY :VARBINARY :GEOMETRY))
 (declaim (inline extract-field process-row))
-(defun extract-field (row field-index field-length raw field-detail)
+(defun extract-field (row field-index field-length type-map field-detail)
   "Returns either a string or an unsigned byte array for known binary types. The
    designation of binary types per the C API seems a bit weird.   Basically,
    BIT, BINARY and VARBINARY are binary and so are BLOBs with the binary flag
@@ -554,64 +587,61 @@
   (destructuring-bind (field-name field-type field-flag) field-detail
     (declare (ignore field-name)
              (optimize (speed 3) (safety 3))
-         (type (integer 0 65536) field-index field-flag)
-         (type (integer 0 4294967296) field-length )
-	 (type (simple-array symbol)  *binary-types*))
+	     (type (integer 0 65536) field-index field-flag)
+	     (type (integer 0 4294967296) field-length )
+	     (type (simple-array symbol)  *binary-types*))
     (if (eql field-length 0)
-	(return-from extract-field (values nil)))
-    (if
-     (or (and (eq field-type :BLOB)
-	       (eq +field-binary+ (logand +field-binary+ field-flag)))
-	 (find field-type *binary-types*))
-     (let ((arr (make-array field-length :element-type '(unsigned-byte 8)))
-	   (ptr (mem-ref row :pointer field-index)))
-       (loop for i from 0 to (1- field-length)
-	  do (setf (elt arr i) (mem-ref ptr :unsigned-char i)))
-	(values  arr))
-     (if raw
-	 (mem-ref row :string field-index)
-	 (let ((fn (cdr (assoc field-type *type-map*))))
-	   (declare (type (or null function) fn))
-	   (values (if (and (not raw) fn)
-		       (funcall fn (mem-ref row :string field-index) field-length)
-		       (mem-ref row :string field-index))))))))
+	(return-from extract-field nil))
+    (if (or (and (eq field-type :BLOB)
+		 (logand +field-binary+ field-flag))
+	    (find field-type *binary-types*))
+	(let ((arr (make-array field-length :element-type '(unsigned-byte 8)))
+	      (ptr (mem-ref row :pointer field-index)))
+	  (loop for i from 0 to (1- field-length)
+	     do (setf (elt arr i) (mem-ref ptr :unsigned-char i)))
+	  (values  arr))
+	(let ((fn (gethash field-type type-map)))
+	  (declare (type (or null symbol function) fn))
+	  (values (if fn
+		      (funcall fn (mem-ref row :string field-index) field-length)
+		      (mem-ref row :string field-index)))))))
 
-(defun process-row (mysql-res row num-fields field-names-and-types raw)
+(defun process-row (mysql-res row num-fields field-names-and-types type-map)
   (declare (optimize (speed 3) (safety 3))
-       (type (integer 0 65536) num-fields)
-       (ftype (function (t fixnum (integer 0 4294967296)  (or t null) list) (or null simple-array simple-string)) extract-field))
+	   (type (integer 0 65536) num-fields)
+	   (ftype (function (t fixnum (integer 0 4294967296)  (or t null) list) (or null simple-array simple-string)) extract-field))
   (let* ((mysql-lens (mysql-fetch-lengths mysql-res))
          (int-size (foreign-type-size :int)))
     (declare (type (integer 0 16) int-size))
     (loop for i of-type fixnum from 0 to (* num-fields int-size) by int-size
        for f of-type list in field-names-and-types
        collect (extract-field row i
-			      (mem-ref mysql-lens :unsigned-long i) raw f))))
+			      (mem-ref mysql-lens :unsigned-long i) type-map f))))
 
-(defun result-data (mysql-res raw field-names-and-types)
+(defun result-data (mysql-res type-map field-names-and-types)
   "Internal function that processes a result set and returns all the data.
    If field-names-and-types is NIL the raw (string) data is returned"
   (declare (optimize (speed 3))
-       (ftype (function (t t fixnum list (or t null)) list) process-row))
+	   (ftype (function (t t fixnum list (or t null)) list) process-row))
   (let ((num-fields (mysql-num-fields mysql-res)))
     (loop for row = (mysql-fetch-row mysql-res)
        until (null-pointer-p row)
-       collect (process-row mysql-res row num-fields field-names-and-types raw))))
+       collect (process-row mysql-res row num-fields field-names-and-types type-map))))
 
-(defun process-result-set (mysql-res &key raw database)
+(defun process-result-set (mysql-res type-map database)
   "Result set will be NULL if the command did not return any results.   In this case we return a cons
    the rows affected."
   (declare (optimize (speed 3)))
   (cond ((null-pointer-p mysql-res)
-     (cons (mysql-affected-rows (or database (get-connection))) nil))
-    (t
-     (let ((fields (field-names-and-types mysql-res)))
-       ;(print fields)
-       (cons
-        (mapcar #'car fields)
-        (result-data mysql-res raw fields))))))
+	 (cons (mysql-affected-rows (or database (get-connection))) nil))
+	(t
+	 (let ((fields (field-names-and-types mysql-res)))
+					;(print fields)
+	   (cons
+	    (mapcar #'car fields)
+	    (result-data mysql-res type-map fields))))))
 
-(defun query (query &key raw database)
+(defun query (query &key (type-map *type-map*) database)
   "For a SELECT query or stored procedure that returns data, query will return 
    a list of result sets.   Each result set will have 1 or more sublists 
    where the first sublist contains the column names and the remaining lists 
@@ -624,8 +654,9 @@
                    INSERT INTO a (a) VALUES (1); DELETE FROM a; DROP TABLE a\")
     ((0) (1) (1) (0))</code></pre>
 
-    The raw flag, if set will disable the translating of MySQL result values 
-    into CL types.   This might be useful for performance reasons, (cl-mysql 
+    The type-map, if set will alter the decoding into CL types.   If you set this to
+    nil it will have the effect of disabling all CL type conversions and return
+    either character or binary data only.   This might be useful for performance reasons, (cl-mysql 
     is much faster when it doesn't need to translate types) but it also might 
     be all you need.   Consider for instance if you're displaying a lot of 
     numerics on a web-page.    If you do not need to convert the data into
@@ -634,15 +665,16 @@
     numeric types to their closest CL representation.   For very large numerics,
     or numerics that have very high precision this might not be what you want.
     In this case you could attempt to write your own conversion routine and 
-    inject it into cl-mysql.   More on this later."
+    inject it into cl-mysql through the type-map.  More on this later ..."
   (with-connection (conn database)
     (error-if-non-zero conn (mysql-query conn query))
     (loop for result-set = (mysql-store-result conn)
        nconc (list (unwind-protect
-			(process-result-set result-set :database conn :raw raw)))
+			(process-result-set result-set (or type-map
+							   (make-hash-table)) conn)))
        until (progn
-           (mysql-free-result result-set)
-           (not (eq 0 (mysql-next-result conn)))))))
+	       (mysql-free-result result-set)
+	       (not (eql 0 (mysql-next-result conn)))))))
 
 (defun ping (&key database)
   "Check whether a connection is established or not.  If :opt-reconnect is 
@@ -652,9 +684,9 @@
     (values t)))
 
 (defun connect (&key host user password database port socket
-        (client-flag (list +client-compress+
-                   +client-multi-statements+
-                   +client-multi-results+)))
+		(client-flag (list +client-compress+
+				   +client-multi-statements+
+				   +client-multi-results+)))
   "Connect will present to MySQL sensible defaults for all the connection items.    
    The following code will attach you to a MySQL instance running on localhost, 
    as the current user with no password.   It will automatically turn on compression 
@@ -667,13 +699,13 @@
    where the :database key argument is omitted."
   (let* ((mysql (mysql-init (null-pointer))))
     (error-if-null mysql (mysql-real-connect mysql
-                         (or host "localhost")
-                         (or user (null-pointer))
-                         (or password (null-pointer))
-                         (or database (null-pointer))
-                         (or port 0)
-                         (or socket (null-pointer))
-                         (or (reduce #'logior (or client-flag '(0))))))
+					     (or host "localhost")
+					     (or user (null-pointer))
+					     (or password (null-pointer))
+					     (or database (null-pointer))
+					     (or port 0)
+					     (or socket (null-pointer))
+					     (or (reduce #'logior (or client-flag '(0))))))
     (add-connection mysql)
     (values mysql)))
 
@@ -686,19 +718,19 @@
   (let ((retval 0))
     (with-connection (conn database)
       (with-foreign-pointer-as-string (str 255)
-    (setq retval (mysql-options conn
-                    (foreign-enum-value 'enum-options option)
-                    (lisp-string-to-foreign value str 255)))))
+	(setf retval (mysql-options conn
+				    (foreign-enum-value 'enum-options option)
+				    (lisp-string-to-foreign value str 255)))))
     (values retval)))
 
 (defun %set-int-option (option value &key database)
   (let ((retval 0))
     (with-connection (conn database)
       (with-foreign-object (int-value :int)
-    (setf (mem-ref int-value :int) value)
-    (setq retval (mysql-options conn
-                    (foreign-enum-value 'enum-options option)
-                    int-value))))
+	(setf (mem-ref int-value :int) value)
+	(setf retval (mysql-options conn
+				    (foreign-enum-value 'enum-options option)
+				    int-value))))
     (values retval)))
 
 (defun option (option value &key database)
