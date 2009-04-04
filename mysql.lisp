@@ -12,7 +12,7 @@
    #:connect #:query #:use #:disconnect #:ping #:option
    #:client-version #:server-version
    #:list-dbs #:list-tables #:list-processes #:list-fields
-   #:escape-string
+   #:escape-string 
    ;; Constants
    #:+client-compress+  #:+client-found-rows+    #:+client-ignore-sigpipe+
    #:+client-ignore-space+  #:+client-interactive+ #:+client-local-files+
@@ -21,7 +21,7 @@
    ;; Internal functions
    #:string-to-integer #:string-to-float
    #:string-to-date #:string-to-seconds #:string-to-universal-time
-   #:string-to-ratio #:extract-field
+   #:string-to-ratio #:extract-field #:cffi-utf8-length
    ;; Enum Options
    #:opt-connect-timeout #:opt-compress #:opt-named-pipe
    #:init-command #:read-default-file #:read-default-group
@@ -244,6 +244,14 @@
 
 (defmysqlfun ("mysql_get_client_version" mysql-get-client-version) :unsigned-long)
 
+(defmysqlfun ("mysql_get_character_set_info" mysql-get-character-set-info) :void
+  (mysql :pointer)
+  (cs :pointer))
+
+(defmysqlfun ("mysql_set_character_set" mysql-set-character-set) :int
+  (mysql :pointer)
+  (csname :string))
+
 (defmysqlfun ("mysql_get_server_version" mysql-get-server-version) :unsigned-long
   (mysql :pointer))
 
@@ -342,6 +350,16 @@
   (decimals :unsigned-int)
   (charsetnr :unsigned-int)
   (type :int))
+
+(defcstruct character-set
+  (number :unsigned-int)
+  (state :unsigned-int)
+  (csname :string)
+  (name :string)
+  (comment :string)
+  (dir :string)
+  (mbminlen :unsigned-int)
+  (mbmaxlen :unsigned-int))
 
 ;;; Decoders
 ;;;
@@ -583,8 +601,47 @@
     (let ((result (error-if-null conn (mysql-list-processes conn))))
       (process-result-set result *type-map* conn))))
 
-;; Result set functions
-;;
+;;; String/Character set/Collation stuff
+;;;
+(defun escape-string (string &key database)
+  "Given a string, encode it appropriately.   This function relies on the fact that
+   the character set encoding was set to UTF-8 when the connection is made."
+  (when string
+    (with-connection (conn database)
+      (with-foreign-string (from-string string)
+	(let* ((from-length (cffi-utf8-length from-string))
+	       (to-length (1+ (* from-length 2)))
+	       (to-string (foreign-alloc :unsigned-char :count to-length))
+	       (return-string nil))
+	  (unwind-protect (progn
+			    (mysql-real-escape-string conn to-string from-string from-length)
+			    (setf return-string (foreign-string-to-lisp to-string)))
+	    (foreign-free to-string))
+	  (values return-string))))))
+
+(defun cffi-utf8-length (cffi-string)
+  "We need this function because mysql_real_escape_string requires the length
+   of the from string in bytes (not characters)"
+  (do ((i 0 (incf i)))
+      ((eql 0 (mem-ref cffi-string :unsigned-char i)) i)))
+
+(defun get-character-set-info (&key database)
+  "Returns the character set information for the connection as a sequence:
+      (collation name number state)"
+  (with-connection (conn database)
+    (with-foreign-object (charset 'character-set)
+      (mysql-get-character-set-info conn charset)
+      (list (foreign-slot-value charset 'character-set 'csname)
+	    (foreign-slot-value charset 'character-set 'name)
+	    (foreign-slot-value charset 'character-set 'number)
+	    (foreign-slot-value charset 'character-set 'state)))))
+
+(defun set-character-set (csname &key database)
+  (with-connection (conn database)
+    (error-if-non-zero database (mysql-set-character-set conn csname))))
+
+;;; Result set functions
+;;;
 (defun field-names-and-types (mysql-res)
   "Retrieve from a MYSQL_RES a list of cons ((<field name> <field type>)*) "
   (let ((num-fields (1- (mysql-num-fields mysql-res)))
@@ -630,8 +687,7 @@
 
 (defun process-row (mysql-res row num-fields field-names-and-types type-map)
   (declare (optimize (speed 3) (safety 3))
-	   (type (integer 0 65536) num-fields)
-	   (ftype (function (t fixnum (integer 0 4294967296)  (or t null) list) (or null simple-array simple-string)) extract-field))
+	   (type (integer 0 65536) num-fields))
   (let* ((mysql-lens (mysql-fetch-lengths mysql-res))
          (int-size (foreign-type-size :int)))
     (declare (type (integer 0 16) int-size))
@@ -728,7 +784,9 @@
 					     (or port 0)
 					     (or socket (null-pointer))
 					     (or (reduce #'logior (or client-flag '(0))))))
+    ;; To ensure proper string decoding between CL & MySQL we better set the connection to be UTF8 ...
     (add-connection mysql)
+    (error-if-non-zero mysql (set-character-set "UTF8" :database mysql))
     (values mysql)))
 
 (defun disconnect (&key database)
@@ -766,17 +824,4 @@
     (null   (%set-int-option option 0 :database database))
     (t      (%set-int-option option value :database database))))
 
-
-(defun escape-string (from-string &key database)
-  "Given a string, encode it appropriately"
-  (with-connection (conn database)
-    (let* ((to-length (+ (* (length from-string) 2) 1))
-	   (to-string (foreign-alloc :char :count to-length))
-	   (return-string nil))
-      (unwind-protect (progn
-			(mysql-real-escape-string conn to-string from-string to-length)
-			(setf return-string (foreign-string-to-lisp to-string))
-			(foreign-free to-string))
-	(foreign-free to-string))
-      (values return-string))))
     

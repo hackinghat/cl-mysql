@@ -51,12 +51,12 @@
     (cffi:with-foreign-object (int :int)
       (setf (cffi:mem-ref int :int) (char-code #\1))
       (setf (cffi:mem-ref ptr :pointer) int)
-      (is (string= "1" (extract-field ptr 0 1 nil '("one" :VARCHAR 0))))
+      (is (string= "1" (extract-field ptr 0 1 *type-map* '("one" :VARCHAR 0))))
       (is (equalp (make-array 1 :initial-element (char-code #\1))
-		  (extract-field ptr 0 1 nil '("bit" :BIT 0)))))
+		  (extract-field ptr 0 1 *type-map* '("bit" :BIT 0)))))
       (setf (cffi:mem-ref ptr :pointer) (cffi:null-pointer))
-      (is (null (extract-field ptr 0 0 nil '("space" :VARCHAR 0))))
-      (is (null (extract-field ptr 0 0 nil '("bit" :BIT 0))))))
+      (is (null (extract-field ptr 0 0 *type-map* '("space" :VARCHAR 0))))
+      (is (null (extract-field ptr 0 0 *type-map* '("bit" :BIT 0))))))
 
 (deftest test-string-to-universal-time ()
   (is (eq nil (string-to-universal-time nil)))
@@ -75,7 +75,11 @@
 	     (coerce (string-to-ratio "-1.23123123" 1) 'double-float)))
   (is (eql 99999 (string-to-ratio "99999" 1)))
   (is (eql (/ 1 10) (string-to-ratio "0.1" 1))))
-  
+
+(deftest test-cffi-utf8-length ()
+  (cffi:with-foreign-string (s "€")
+    (is (eql 3 (cffi-utf8-length s)))))
+
 (in-root-suite)
 
 (defsuite* test-with-connection)
@@ -132,9 +136,19 @@
                   '2009-12-31 00:00:00', '2009-12-31', '00:00:00', 2009, 'TEST1', 'TEST2', 'TEST3', 'TEST4', 'TEST5', 'TEST6', 
                   'TEST7', 'TEST8', 'TEST9', 'TEST10', 'TEST11', 'TEST12', 'small','one,two',GeomFromText('POINT(1 1)'),
                   12345678901234567890123456789012345678901234567890123456789012345)")
-  ;; We aren't so much worried about the results as that they are decoded ...
+  ;; Now confirm that the decoding via the type-maps is as we expect ... this
+  ;; pretty much completes our integration test at a broad level
   (query "SELECT * FROM test_table")
   (query "DROP DATABASE cl_mysql_test")
   (disconnect))
  
-
+(deftest test-escape-string ()
+  (connect)
+  (is (eq nil (escape-string nil)))
+  (is (string= "" (escape-string "")))
+  (is (string= "\\\"" (escape-string "\"")))
+  (is (string= "\\\'" (escape-string "'")))
+  (is (string= "\\n\\r" (escape-string (format nil "~C~C"
+					    (code-char 10)
+					    (code-char 13)))))
+  (disconnect))

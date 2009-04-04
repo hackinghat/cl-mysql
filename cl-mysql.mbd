@@ -8,5 +8,6 @@
   (:serial t)
   (:components
    "mysql"
-   "package")
+   "package"
+   "test")
   (:needs :cffi))
