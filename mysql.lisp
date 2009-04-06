@@ -815,7 +815,7 @@
 					     (or port 0)
 					     (or socket (null-pointer))
 					     (or (reduce #'logior (or client-flag '(0))))))
-    ;; To ensure proper string decoding between CL & MySQL we better set the connection to be UTF8 ...
+    ;; To ensure proper string decoding between CL & MySQL we better set the connection to be UTF-8 ...
     (add-connection mysql)
     (error-if-non-zero mysql (set-character-set "UTF8" :database mysql))
     (values mysql)))
