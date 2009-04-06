@@ -12,7 +12,8 @@
    #:connect #:query #:use #:disconnect #:ping #:option
    #:client-version #:server-version
    #:list-dbs #:list-tables #:list-processes #:list-fields
-   #:escape-string 
+   #:escape-string
+   #:next-result-set #:next-row
    ;; Constants
    #:+client-compress+  #:+client-found-rows+    #:+client-ignore-sigpipe+
    #:+client-ignore-space+  #:+client-interactive+ #:+client-local-files+
@@ -260,6 +261,9 @@
   (db :string))
 
 (defmysqlfun ("mysql_store_result" mysql-store-result) :pointer
+  (mysql :pointer))
+
+(defmysqlfun ("mysql_use_result" mysql-use-result) :pointer
   (mysql :pointer))
 
 (defmysqlfun ("mysql_num_rows" mysql-num-rows) :unsigned-long-long
@@ -525,11 +529,18 @@
   return-value)
 
 (defun error-if-null (database return-value)
-  (if (null-pointer-p return-value)
+  (if (null return-value)
+      (error 'mysql-error
+	     :message (mysql-error database)
+	     :errno (mysql-errno database)))
+  return-value)
+
+(defun error-if-set (database)
+  (let ((errno (mysql-errno database)))
+    (when (not (eql 0 errno))
       (error 'mysql-error 
 	     :message (mysql-error database)
-	     :error (mysql-errno database)))
-  return-value)
+	     :error errno))))
 
 ;;; Connections
 ;;;
@@ -672,7 +683,7 @@
     (if (eql field-length 0)
 	(return-from extract-field nil))
     (if (or (and (eq field-type :BLOB)
-		 (logand +field-binary+ field-flag))
+		 (logtest +field-binary+ field-flag))
 	    (find field-type *binary-types*))
 	(let ((arr (make-array field-length :element-type '(unsigned-byte 8)))
 	      (ptr (mem-ref row :pointer field-index)))
@@ -719,7 +730,26 @@
 	    (mapcar #'car fields)
 	    (result-data mysql-res type-map fields))))))
 
-(defun query (query &key (type-map *type-map*) database)
+(defun next-result-set (last-result &key database)
+  "Retrieve the next result set."
+  (with-connection (conn database)
+    (when last-result
+      (mysql-free-result last-result)
+      (if (not (eql 0 (mysql-next-result conn)))
+	  (return-from next-result-set nil)))
+    (error-if-null conn (mysql-use-result conn))))
+
+(defun next-row (result-set &key (type-map *type-map*) database)
+  "Retrieve and decode (according to the type map) the next row in the query.   This
+   function will return NIL when the last row has been retrieved."
+  (with-connection (conn database)
+    (let* ((fields-and-names (field-names-and-types result-set))
+	   (row (mysql-fetch-row result-set)))
+      (if (null-pointer-p row)
+	(error-if-set conn)
+	(process-row result-set row (length fields-and-names) fields-and-names type-map)))))
+
+(defun query (query &key (type-map *type-map*) database (store t))
   "For a SELECT query or stored procedure that returns data, query will return 
    a list of result sets.   Each result set will have 1 or more sublists 
    where the first sublist contains the column names and the remaining lists 
@@ -746,13 +776,14 @@
     inject it into cl-mysql through the type-map."
   (with-connection (conn database)
     (error-if-non-zero conn (mysql-query conn query))
-    (loop for result-set = (mysql-store-result conn)
-       nconc (list (unwind-protect
-			(process-result-set result-set (or type-map
-							   (make-hash-table)) conn)))
-       until (progn
-	       (mysql-free-result result-set)
-	       (not (eql 0 (mysql-next-result conn)))))))
+    (if store
+      (loop for result-set = (mysql-store-result conn)
+	 nconc (list (unwind-protect
+			  (process-result-set result-set (or type-map
+							     (make-hash-table)) conn)))
+	 until (progn
+		 (mysql-free-result result-set)
+		 (not (eql 0 (mysql-next-result conn))))))))
 
 (defun ping (&key database)
   "Check whether a connection is established or not.  If :opt-reconnect is 
@@ -824,4 +855,8 @@
     (null   (%set-int-option option 0 :database database))
     (t      (%set-int-option option value :database database))))
 
-    
+(defun get-field (column-name field-names-and-types row)
+  "Returns the correct element in the sequence from the row that matches the column-name"
+  (elt row (position column-name field-names-and-types :test (lambda (x)
+						      (string= (car x) column-name)))))
+

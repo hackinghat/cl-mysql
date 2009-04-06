@@ -5,7 +5,7 @@
 (defpackage com.hackinghat.cl-mysql-pool
   (:use :cl :cffi :cl-mysql-system)
   (:nicknames "CL-MYSQL-POOL")
-  (:export ))
+  (:export #:connection-holder))
 
 #+sbcl (use-package "SB-THREAD")
 
@@ -16,9 +16,19 @@
   #+sbcl (sb-thread:make-mutex :name "Pool Lock")
   #-sbcl nil)
 
+(defclass connection-holder ()
+  ((hostname :type string :reader hostname)
+   (username :type string :reader username)
+   (password :type string :reader password)
+   (database :type string :reader database)
+   (socket :type string :reader socket)
+   (client-flags :type integer :reader client-flags)
+   (pointer :type t :initform (null-pointer) :accessor pointer)
+   (in-use :type (or null t) :initform nil :accessor in-use)))
+
 (defmacro with-pool-lock (&body body)
   (if *mutex*
-	`(with-recursive-mutex (*mutex*)
+	`(with-recursive-lock (*mutex*)
 	   ,@body)
 	`(progn ,@body)))
 

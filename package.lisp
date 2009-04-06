@@ -9,7 +9,7 @@
 	  #:connect #:query #:use #:disconnect #:ping #:option
 	  #:client-version #:server-version
 	  #:list-dbs #:list-tables #:list-processes #:list-fields
-	  #:escape-string #:*type-map*
+	  #:escape-string #:next-result-set #:next-row #:*type-map*
 	  #:opt-connect-timeout #:opt-compress #:opt-named-pipe
 	  #:init-command #:read-default-file #:read-default-group
           #:+client-compress+  #:+client-found-rows+    #:+client-ignore-sigpipe+
@@ -26,7 +26,7 @@
   (:export #:connect #:query #:use #:disconnect #:ping #:option
 	   #:client-version #:server-version
 	   #:list-dbs #:list-tables #:list-processes #:list-fields
-	   #:escape-string #:*type-map*
+	   #:escape-string #:next-result-set #:next-row #:*type-map*
 	   #:+client-compress+  #:+client-found-rows+    #:+client-ignore-sigpipe+
 	   #:+client-ignore-space+  #:+client-interactive+ #:+client-local-files+
 	   #:+client-multi-statements+  #:+client-multi-results+  #:+client-no-schema+
