@@ -411,50 +411,6 @@
     (error-if-non-zero conn (mysql-ping conn))
     (values t)))
 
-(defun connect (&key host user password database port socket
-		(client-flag (list +client-compress+
-				   +client-multi-statements+
-				   +client-multi-results+)))
-  "Connect will present to MySQL sensible defaults for all the connection items.    
-   The following code will attach you to a MySQL instance running on localhost, 
-   as the current user with no password.   It will automatically turn on compression 
-   between client-and-server and also enable multiple-result sets if possible.
-
-   CL-USER> (connect)
-
-   If unsuccesful connect will raise a SIMPLE-ERROR, otherwise it will place the 
-   connection into a stack.   This value will be used in all subsequent operations 
-   where the :database key argument is omitted."
-  (flet ((internal-connect (mysql host user password database port socket flags)
-	   (error-if-null mysql
-			  (mysql-real-connect mysql
-					      host
-					      user
-					      password
-					      database
-					      port
-					      socket
-					      flags))
-	   (cl-mysql-pool:add-connection mysql host user password database port socket flags)))
-    (let* ((mysql (mysql-init (null-pointer))))
-      (internal-connect mysql
-			(or host "localhost")
-			(or user (null-pointer))
-			(or password (null-pointer))
-			(or database (null-pointer))
-			(or port 0)
-			(or socket (null-pointer))
-			(or (reduce #'logior (or client-flag '(0)))))
-      ;; To ensure proper string decoding between CL & MySQL we better set the connection to be UTF-8 ...
-      (error-if-non-zero mysql (set-character-set "UTF8" :database mysql))
-      (values mysql))))
-
-(defun disconnect (&key database)
-  "Unless database is supplied, disconnect will take the top element of the connection stack and close it."
-  (with-connection (conn database)
-    (mysql-close conn)
-    (cl-mysql-pool:remove-connection conn)))
-
 (defun %set-string-option (option value &key database)
   (let ((retval 0))
     (with-connection (conn database)
