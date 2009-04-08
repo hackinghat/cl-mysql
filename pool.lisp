@@ -35,10 +35,11 @@
 (defmethod next-result-set ((self connection))
   "Retrieve the next result set."
   (let ((last-result (result-set self)))
-    (when last-result
+    (unless (null-pointer-p last-result)
       (mysql-free-result last-result)
-      (if (eql 0 (mysql-next-result (pointer self)))
-	  (return-from next-result-set (setf (result-set self) nil)))))
+      (if (not (eql 0 (mysql-next-result (pointer self))))
+	  (return-from next-result-set
+	    (setf (result-set self) (null-pointer))))))
   (let ((next-result (mysql-use-result (pointer self))))
     (error-if-null self next-result)
     (setf
