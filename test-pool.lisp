@@ -86,6 +86,12 @@
 	(is (eql 1 total))
 	(is (eql 1 available))))))
 
+(deftest test-can-aquire ()
+  (let* ((pool (connect :min-connections 1 :max-connections 3))
+	 (conn (query "USE mysql" :store nil)))
+    (is (not (can-aquire pool)))
+    (release conn)
+    (is (can-aquire pool))))
 
 (deftest test-contains ()
   (let* ((pool (connect :min-connections 1 :max-connections 1))
@@ -95,6 +101,3 @@
     (release conn)
     (is (contains pool (available-connections pool) conn))
     (is (contains pool (connections pool) conn))))
-
-(deftest test-return-to-available ()
-  ())

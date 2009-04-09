@@ -12,7 +12,7 @@
    #:connection #:connection-pool
    ;; Methods
    #:connected #:available #:in-use #:pointer #:connection-equal
-   #:aquire #:release #:count-connections #:contains #:connections #:available-connections
+   #:aquire #:can-aquire #:release #:count-connections #:contains #:connections #:available-connections
    #:result-set
    ;; Special vairalbes
    #:*type-map* #:*last-connection*
