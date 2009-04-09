@@ -13,7 +13,7 @@
    ;; Methods
    #:connected #:available #:in-use #:pointer #:connection-equal
    #:aquire #:can-aquire #:release #:count-connections #:contains #:connections #:available-connections
-   #:result-set
+   #:result-set #:max-connections #:min-connections
    ;; Special vairalbes
    #:*type-map* #:*last-connection*
    ;; Public functions

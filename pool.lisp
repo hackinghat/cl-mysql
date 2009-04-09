@@ -104,14 +104,22 @@
 (defun pool-wait (pool)
   "We release the pool lock we're holding to wait on the queue lock.   Note that
    we MUST gain the pool lock back before we can continue because dependent code
-   is expecting us "
-  #+sbcl (unwind-protect (progn
-			    (sb-thread:release-mutex (pool-lock pool))
-			    (sb-thread:with-mutex ((wait-queue-lock pool))
-			      (loop until (can-aquire pool)
-				 do (sb-thread:condition-wait (wait-queue pool)
-							      (wait-queue-lock pool)))))
-	    (sb-thread:get-mutex (pool-lock pool))))
+   is expecting us.   This method is a little fiddly because we need to make sure
+   that we have the pool lock before we call can-aquire, but also we should not
+   release the lock unless we can't aquire.  We also throw in an unwind-protect
+   to try and make sure that whatever happens we reenter the pool code with the
+   lock held. "
+  #+sbcl (progn
+	   (sb-thread:release-mutex (pool-lock pool))
+	   (sb-thread:with-mutex ((wait-queue-lock pool))
+	     (loop until (progn
+			   (sb-thread:get-mutex (pool-lock pool))
+			   (cond
+			     ((can-aquire pool) t)
+			     (t
+			      (sb-thread:release-mutex (pool-lock pool))
+			      (sb-thread:condition-wait (wait-queue pool)
+							(wait-queue-lock pool)))))))))
 
 (defun pool-notify (pool)
   #+sbcl (sb-thread:with-mutex ((wait-queue-lock pool))
@@ -137,9 +145,14 @@
    (wait-queue :accessor wait-queue :initform (make-wait-resource)))
   (:documentation "All connections are initiated through a pool. "))
 
+(defmethod (setf max-connections) ((max-connect number) (pool connection-pool))
+  (setf (slot-value pool 'max-connections) max-connect)
+  (pool-notify pool))
+
 (defmethod add-connection ((self connection-pool) (conn connection))
   (vector-push-extend conn (connections self))
-  (vector-push-extend conn (available-connections self)))
+  (vector-push-extend conn (available-connections self))
+  (pool-notify self))
 
 (defmethod remove-connection-from-array ((self connection-pool) array conn)
   "Returns a new array with the given connection object removed (set to NIL)
@@ -179,27 +192,21 @@
   (remove-connection-from-array self (connections self) conn)
   (mysql-close (pointer conn)))
 
-
 (defmethod count-connections ((self connection-pool))
   "Count the number of connections in the pool.   If you are dynamically changing
    the size of the pool after it is created this number could be greater or less than 
    max/min connections.   Set :available-only if you only want to know how many
    connections are currently ready to use."
   ;; Mutex
-  (do ((i 0 (incf i))
-       (available 0)
-       (total 0))
-      ((= i (fill-pointer (connections self))) (values total available))
-    (when (available (elt (connections self) i))
-      (incf available))
-    (when (connected (elt (connections self) i))
-      (incf total))))
+  (values
+   (count-if #'identity (connections self))
+   (count-if #'identity (available-connections self))))
 
 (defmethod can-aquire ((self connection-pool))
+  "Returns true if a call to aquire would result in a connection being allocated"
   (multiple-value-bind (total available)
       (count-connections self)
-    (declare (ignore total))
-    (> available 0)))
+    (or (> available 0) (< total (max-connections self)))))
 
 (defmethod connect-upto-minimum ((self connection-pool) n min)
   "We use this method to allocate up to the minimum number of connections.
@@ -224,7 +231,16 @@
 
 (defmethod take-first ((self connection-pool))
   "Take the first available connection from the pool.   If there are none, NIL is returned."
+  ;; Pool wait will not return until a connection can be aquired.
   (pool-wait self)
+  ;; After this call we should have enough available connections to take one
+  (multiple-value-bind (total available) (count-connections self)
+    (connect-upto-minimum self total
+			  (if (> available 0)
+			      (min-connections self)
+			      (min 
+			       (max-connections self)
+			       (1+ total)))))
   (let ((first (loop for conn across (connections self)
 		  if (and conn (available conn))
 		  return conn)))
@@ -248,18 +264,10 @@
   ;; Mutex
   (with-lock (pool-lock self)
     (multiple-value-bind (total available) (count-connections self)
-      ;; After this call we should have enough available connections to take one, otherwise we will
-      ;; need to block ...
-      (connect-upto-minimum self total
-			    (if (> available 0)
-				(min-connections self)
-				(min 
-				 (max-connections self)
-				 (1+ total))))
       (let ((candidate (take-first self)))
 	(when (not  candidate)
 	  (error 'cl-mysql-error :message "Can't allocate any more connections!"))
-	(values candidate)))))
+	(values candidate))))
 
 (defmethod aquire ((self connection) block)
   (declare (ignore block))

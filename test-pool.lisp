@@ -45,6 +45,21 @@
 	(cl-mysql-error (c) t)
 	(error (c) nil))))
 
+(deftest test-count-connections-directly ()
+  "There will, from time-to-time be NILs in the arrays so we better make sure
+   that we can handle them and they don't interfere with the count"
+  (let ((pool (connect :min-connections 1 :max-connections 1)))
+    (setf (available-connections pool)
+	  (make-array 3 :fill-pointer t :initial-contents (list NIL (aref (available-connections pool) 0) NIL)))
+    (setf (connections pool)
+	  (make-array 3 :fill-pointer t :initial-contents (list NIL (aref (connections pool) 0) NIL)))
+    (is (eql 1 (count-connections pool)))
+    ;; Now set the number of available to the empty vector, this simulates us
+    ;; not having any available connections.
+    (setf (available-connections pool)
+	  (make-array 0))
+    (is (eql 1 (count-connections pool)))))
+
 (deftest test-count-connections ()
   (let ((pool (connect :min-connections 1 :max-connections 1)))
     (multiple-value-bind (total available) (count-connections pool)
@@ -101,3 +116,50 @@
     (release conn)
     (is (contains pool (available-connections pool) conn))
     (is (contains pool (connections pool) conn))))
+
+
+(defun generic-start-thread-in-nsecs (fn n)
+  #+sbcl (sb-thread:make-thread (lambda ()
+				  (sleep n)
+				  (funcall fn))))
+(deftest test-thread-1 ()
+  "Testing threading is always a bit suspect but we can test a little bit of it to
+   make sure we have the general idea correct."
+  (let ((pool (connect :min-connections 1 :max-connections 1))
+	(conn (query "SELECT 1" :store nil)))
+    ;; Now we have a pool of 1 connection that is allocated, so start a thread
+    ;; that will in 2 seconds increas the pool size to 2.
+    (generic-start-thread-in-nsecs (lambda ()
+				     (setf (max-connections pool) 2)) 1)
+    ;; This line will block until the thread above changes the max pool size
+    (list-processes :database pool)
+    (release conn)
+    ;; Because we increased the max connection count we should have closed
+    ;; the extra connection we opened so we should be back to the initial state.
+    (multiple-value-bind (total available)
+	(count-connections pool)
+      (is (eql 1 total))
+      (is (eql 1 available)))))
+
+(deftest test-thread-2 ()
+  "This is the reverse of test-thread-1 in as much as we have a long running 
+   query and our main thread waits until the long running query is completed.
+   We use a closure to set a flag to indicate success."
+  (let ((pool (connect :min-connections 1 :max-connections 1))
+	(result nil))
+    ;; Now we have a pool of 1 connection that is allocated, so start a thread
+    ;; that will in 2 seconds increas the pool size to 2.
+    (generic-start-thread-in-nsecs (lambda ()
+				     (let ((conn (query "SELECT 1" :store nil)))
+				       (sleep 1)
+				       (release conn)
+				       (setf result 1))) 0)
+    ;; This line will block until the thread above completes
+    (list-processes)
+    (is (eql 1 result))
+    ;; Because we increased the max connection count we should have closed
+    ;; the extra connection we opened so we should be back to the initial state.
+    (multiple-value-bind (total available)
+	(count-connections pool)
+      (is (eql 1 total))
+      (is (eql 1 available)))))
