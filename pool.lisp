@@ -133,8 +133,8 @@
    (port :type integer :reader port :initarg :port :initform 0)
    (socket :type string :reader socket :initarg :socket :initform nil)
    (flags :type integer :reader flags :initarg :flags :initform 0)
-   (min-connections :type integer :accessor min-connections :initarg :min-connections :initform 1)
-   (max-connections :type integer :accessor max-connections :initarg :max-connections :initform 1)
+   (min-connections :type integer :reader min-connections :initarg :min-connections :initform 1)
+   (max-connections :type integer :reader max-connections :initarg :max-connections :initform 1)
    (available-connections :type array :accessor available-connections :initform nil)
    (connections :type array :accessor connections :initform nil)
    ;; We need two locks per pool, one to keep the internal state of the pool
@@ -147,6 +147,10 @@
 
 (defmethod (setf max-connections) ((max-connect number) (pool connection-pool))
   (setf (slot-value pool 'max-connections) max-connect)
+  (pool-notify pool))
+
+(defmethod (setf min-connections) ((min-connect number) (pool connection-pool))
+  (setf (slot-value pool 'min-connections) min-connect)
   (pool-notify pool))
 
 (defmethod add-connection ((self connection-pool) (conn connection))
@@ -263,11 +267,10 @@
   ;; pool was disconnected or if the number of min connections has changed
   ;; Mutex
   (with-lock (pool-lock self)
-    (multiple-value-bind (total available) (count-connections self)
-      (let ((candidate (take-first self)))
-	(when (not  candidate)
-	  (error 'cl-mysql-error :message "Can't allocate any more connections!"))
-	(values candidate))))
+    (let ((candidate (take-first self)))
+      (when (not  candidate)
+	(error 'cl-mysql-error :message "Can't allocate any more connections!"))
+      (values candidate))))
 
 (defmethod aquire ((self connection) block)
   (declare (ignore block))
