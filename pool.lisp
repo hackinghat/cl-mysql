@@ -29,36 +29,46 @@
    (result-set :type t :initform (null-pointer) :accessor result-set)
    (in-use :type (or null t) :initform nil :accessor in-use :initarg :in-use)
    (owner-pool :type t :reader owner-pool :initarg :owner-pool)
-   (result-set-fields :type list :initform nil :accessor result-set-fields))
+   (result-set-fields :type list :initform nil :accessor result-set-fields)
+   (use-query-active :type (or null t) :initform nil :accessor use-query-active))
   (:documentation "The slots necessary to manage a MySQL database connection."))
 
 (defmethod next-result-set ((self connection))
-  "Retrieve the next result set."
-  (let ((last-result (result-set self)))
+  "Retrieve the next result set.  Returns NIL when there are no more result sets."
+  (let ((last-result (result-set self))
+	(affected-rows 0))
+    ;; Firstly free any prior results
     (unless (null-pointer-p last-result)
-      (mysql-free-result last-result)
-      (if (not (eql 0 (mysql-next-result (pointer self))))
-	  (return-from next-result-set
-	    (setf (result-set self) (null-pointer))))))
-  (let ((next-result (mysql-use-result (pointer self))))
-    (error-if-null self next-result)
-    (setf
-     (result-set self) next-result
-     (result-set-fields self) (append
-			       (list (field-names-and-types next-result))
-			       (result-set-fields self)))
-    (values t)))
+      (setf affected-rows (mysql-affected-rows (pointer self)))
+      (mysql-free-result last-result))
+    ;; Now check if there are more results ...
+    (if (not (eql 0 (mysql-next-result (pointer self))))
+	(progn (setf (result-set self) (null-pointer))
+	       (setf (result-set-fields self) nil)
+	       (setf (use-query-active self) nil)
+	       (return-from next-result-set
+		 (values nil affected-rows))))
+    ;; Now advance into the next result set.
+    (let ((next-result (mysql-use-result (pointer self))))
+      (error-if-null self next-result)
+      (setf
+       (result-set self) next-result
+       (result-set-fields self) (append
+				 (list (field-names-and-types next-result))
+				 (result-set-fields self)))
+      (values t affected-rows))))
 
 (defmethod next-row ((self connection) &key (type-map *type-map*))
   "Retrieve and decode (according to the type map) the next row in the query.   This
    function will return NIL when the last row has been retrieved."
-  (let* ((fields-and-names (car (last (result-set-fields self))))
-	 (row (mysql-fetch-row (result-set self))))
-    (if (null-pointer-p row)
-	(error-if-set self)
-	(process-row (result-set self) row
-		     (length fields-and-names)
-		     fields-and-names type-map))))
+  (unless (null-pointer-p (result-set self))
+    (let* ((fields-and-names (car (last (result-set-fields self))))
+	   (row (mysql-fetch-row (result-set self))))
+      (if (null-pointer-p row)
+	  (error-if-set self)
+	  (process-row (result-set self) row
+		       (length fields-and-names)
+		       fields-and-names type-map)))))
 
 (defmethod connection-equal ((self t) (other t))
   nil)
@@ -241,6 +251,11 @@
 	(do ((i (1- (fill-pointer array)) (decf i)))
 	    ((or (< i 0) (elt array i)) (1+ i)))))
 
+(defmethod consume-unused-results ((self connection))
+  "If a client attempts to release a connection without consuming all the results then we take care of that
+   for them."
+  (loop while (next-result-set self)))
+
 (defmethod release ((self connection) &optional conn)
   "Convenience method to allow the release to be done with a connection"
   (release (owner-pool self) (or conn self)))
@@ -249,13 +264,15 @@
   "Release a connection back into the pool."
   (if (null conn)
       (error 'cl-mysql-error :message "Internal Error: Connection must be supplied when releasing a pool object!"))
-  ;; Mutex 
+  (if (use-query-active conn)
+      (consume-unused-results conn))
   (let ((total (count-connections self)))
     (if (> total (max-connections self))
 	(disconnect-from-server self conn)
 	(return-to-available conn))
     (clean-connections self (connections self))
-    (clean-connections self (available-connections self))))
+    (clean-connections self (available-connections self)))
+  (values))
 
 (defun connect (&key host user password database port socket
 		(client-flag (list +client-compress+

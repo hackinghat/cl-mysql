@@ -10,6 +10,8 @@
 
 (in-root-suite)
 
+(defsuite* test)
+
 (defsuite* test-base)
 
 (deftest test-string-to-integer ()
@@ -83,7 +85,6 @@
   (cffi:with-foreign-string (s "€")
     (is (eql 3 (cffi-utf8-length s)))))
 
-(in-root-suite)
 
 (defsuite* test-with-connection)
 
@@ -189,7 +190,7 @@
 					    (code-char 13)))))
   (disconnect))
 
-(deftest test-use-result ()
+(deftest test-use-result-1 ()
   "Test out the self-service result set stuff.  It works but it's a bit tricky to build
    a working result set/row processing loop ..."
   (connect)
@@ -207,7 +208,8 @@
 		  ((null row) nrows))))
       (is (eql 4 total-rows))
       (release conn)))
-    ;; Now do it again using a loop style
+    ;; Now do it again using a loop style, the code is equivalent.   This just documents
+    ;; the two idioms for processing result sets.
     (let ((conn (query "SELECT * FROM X; SELECT * FROM X" :store nil)))
       (unwind-protect 
 	   (is (eql 4 (loop while (next-result-set conn)
@@ -220,4 +222,21 @@
   (query "DROP DATABASE cl_mysql_test")
   (disconnect)
   (values))
-  
+
+(deftest test-use-result-2 ()
+  "We should be able to use two result sets simultaneously."
+  (connect :min-connections 2 :max-connections 2)
+  (query "DROP DATABASE IF EXISTS cl_mysql_test; CREATE DATABASE cl_mysql_test; 
+                  GRANT ALL ON cl_mysql_test.* TO USER(); FLUSH PRIVILEGES;")
+  (use "cl_mysql_test")
+  (query "CREATE TABLE X ( X INT ); INSERT INTO X (X) VALUES (10)")
+  (let ((a (query "USE cl_mysql_test; SELECT * FROM X" :store nil))
+	(b (query "USE cl_mysql_test; SELECT * FROM X" :store nil)))
+    (next-result-set a) (next-result-set a)
+    (next-result-set b) (next-result-set b)
+    (is (eql 100 (* (car (next-row a))
+		    (car (next-row b)))))
+    (release a)
+    (release b)
+    (query "DROP DATABASE cl_mysql_test")
+    (disconnect)))

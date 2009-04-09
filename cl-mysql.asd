@@ -13,7 +13,7 @@
   :perform (test-op :after (op c)
 		    (describe
 		     (funcall
-		      (intern "TEST-BASE" :cl-mysql-test))))
+		      (intern "TEST" :cl-mysql-test))))
   :serial t
   :components ((:file "system")
 	       (:file "pool")

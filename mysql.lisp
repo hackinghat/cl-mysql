@@ -279,16 +279,17 @@
 ;;;
 (defun field-names-and-types (mysql-res)
   "Retrieve from a MYSQL_RES a list of cons ((<field name> <field type>)*) "
-  (let ((num-fields (1- (mysql-num-fields mysql-res)))
-	(fields (mysql-fetch-fields mysql-res)))
-    (loop for i from 0 to num-fields
-       collect (let ((mref (mem-aref fields 'mysql-field i)))
-		 (list
-		  (foreign-slot-value mref 'mysql-field 'name)
-		  (foreign-enum-keyword
-		   'enum-field-types
-		   (foreign-slot-value mref 'mysql-field 'type))
-		  (foreign-slot-value mref 'mysql-field 'flags))))))
+  (unless (null-pointer-p mysql-res)
+    (let ((num-fields (1- (mysql-num-fields mysql-res)))
+	  (fields (mysql-fetch-fields mysql-res)))
+      (loop for i from 0 to num-fields
+	 collect (let ((mref (mem-aref fields 'mysql-field i)))
+		   (list
+		    (foreign-slot-value mref 'mysql-field 'name)
+		    (foreign-enum-keyword
+		     'enum-field-types
+		     (foreign-slot-value mref 'mysql-field 'type))
+		    (foreign-slot-value mref 'mysql-field 'flags)))))))
 
 (defparameter *binary-types* #(:BIT :BINARY :VARBINARY :GEOMETRY))
 (declaim (inline extract-field process-row))
@@ -383,13 +384,15 @@
     inject it into cl-mysql through the type-map."
   (with-connection (conn database store)
     (error-if-non-zero conn (mysql-query (pointer conn) query))
-    (if store
-	(loop for result-set = (mysql-store-result (pointer conn))
-	 nconc (list (process-result-set result-set (or type-map (make-hash-table)) conn))
-	 until (progn
-		 (mysql-free-result result-set)
-		 (not (eql 0 (mysql-next-result (pointer conn))))))
-      (values conn))))
+    (cond (store
+	   (loop for result-set = (mysql-store-result (pointer conn))
+	      nconc (list (process-result-set result-set (or type-map (make-hash-table)) conn))
+	      until (progn
+		      (mysql-free-result result-set)
+		      (not (eql 0 (mysql-next-result (pointer conn)))))))
+	  (t
+	   (setf (use-query-active conn) t)
+	   (values conn)))))
 
 (defun ping (&key database)t
   "Check whether a connection is established or not.  If :opt-reconnect is 

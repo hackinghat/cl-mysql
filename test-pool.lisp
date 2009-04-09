@@ -4,8 +4,6 @@
 ;;;;
 (in-package "CL-MYSQL-TEST")
 
-(in-root-suite)
-
 (defsuite* test-pool)
 
 (deftest test-connection ()
