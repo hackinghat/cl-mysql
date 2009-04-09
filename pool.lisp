@@ -101,16 +101,21 @@
   #+sbcl `(sb-thread:with-recursive-lock (,lock) ,@body)
   #-sbcl body)
 
-(defmacro pool-wait (pool &body body)
-  #+sbcl `(sb-thread:with-mutex ((wait-queue-lock ,pool))
-	    (loop until (can-aquire ,pool)
-	       do (sb-thread:condition-wait (wait-queue ,pool)
-					    (wait-queue-lock ,pool)))
-	    ,@body))
+(defun pool-wait (pool)
+  "We release the pool lock we're holding to wait on the queue lock.   Note that
+   we MUST gain the pool lock back before we can continue because dependent code
+   is expecting us "
+  #+sbcl (unwind-protect (progn
+			    (sb-thread:release-mutex (pool-lock pool))
+			    (sb-thread:with-mutex ((wait-queue-lock pool))
+			      (loop until (can-aquire pool)
+				 do (sb-thread:condition-wait (wait-queue pool)
+							      (wait-queue-lock pool)))))
+	    (sb-thread:get-mutex (pool-lock pool))))
 
-(defmacro pool-notify (pool &body body)
-  #+sbcl `(sb-thread:with-mutex ((wait-queue-lock ,pool))
-	    (sb-thread:condition-notify (wait-queue ,pool))))
+(defun pool-notify (pool)
+  #+sbcl (sb-thread:with-mutex ((wait-queue-lock pool))
+	    (sb-thread:condition-notify (wait-queue pool))))
 
 (defclass connection-pool (connectable)
   ((hostname :type string :reader hostname :initarg :hostname :initform nil)
@@ -219,14 +224,14 @@
 
 (defmethod take-first ((self connection-pool))
   "Take the first available connection from the pool.   If there are none, NIL is returned."
-  (pool-wait self
-    (let ((first (loop for conn across (connections self)
-		    if (and conn (available conn))
-		    return conn)))
-      (toggle first)
-      (remove-connection-from-array self (available-connections self) first)
-      (clean-connections self (available-connections self))
-      (values first))))
+  (pool-wait self)
+  (let ((first (loop for conn across (connections self)
+		  if (and conn (available conn))
+		  return conn)))
+    (toggle first)
+    (remove-connection-from-array self (available-connections self) first)
+    (clean-connections self (available-connections self))
+    (values first)))
 
 (defmethod aquire ((self t) (block t))
   (error 'cl-mysql-error :message "There is no available pool to aquire from!"))
