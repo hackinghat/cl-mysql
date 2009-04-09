@@ -91,6 +91,27 @@
 (defmethod toggle ((self connection))
   (setf (in-use self) (not (in-use self))))
 
+(defun make-lock (name)
+  #+sbcl (sb-thread:make-mutex :name name))
+
+(defun make-wait-resource ()
+  #+sbcl (sb-thread:make-waitqueue))
+
+(defmacro with-lock (lock &body body)
+  #+sbcl `(sb-thread:with-recursive-lock (,lock) ,@body)
+  #-sbcl body)
+
+(defmacro pool-wait (pool &body body)
+  #+sbcl `(sb-thread:with-mutex ((wait-queue-lock ,pool))
+	    (loop until (can-aquire ,pool)
+	       do (sb-thread:condition-wait (wait-queue ,pool)
+					    (wait-queue-lock ,pool)))
+	    ,@body))
+
+(defmacro pool-notify (pool &body body)
+  #+sbcl `(sb-thread:with-mutex ((wait-queue-lock ,pool))
+	    (sb-thread:condition-notify (wait-queue ,pool))))
+
 (defclass connection-pool (connectable)
   ((hostname :type string :reader hostname :initarg :hostname :initform nil)
    (username :type string :reader username :initarg :username :initform nil)
@@ -102,7 +123,13 @@
    (min-connections :type integer :accessor min-connections :initarg :min-connections :initform 1)
    (max-connections :type integer :accessor max-connections :initarg :max-connections :initform 1)
    (available-connections :type array :accessor available-connections :initform nil)
-   (connections :type array :accessor connections :initform nil))
+   (connections :type array :accessor connections :initform nil)
+   ;; We need two locks per pool, one to keep the internal state of the pool
+   ;; safe and another to allow us to block other threads from trying to aquire more
+   ;; connections than the pool contains ...
+   (pool-lock :accessor pool-lock :initform (make-lock "Pool Lock"))
+   (wait-queue-lock :accessor wait-queue-lock :initform (make-lock "Queue Lock"))
+   (wait-queue :accessor wait-queue :initform (make-wait-resource)))
   (:documentation "All connections are initiated through a pool. "))
 
 (defmethod add-connection ((self connection-pool) (conn connection))
@@ -163,6 +190,12 @@
     (when (connected (elt (connections self) i))
       (incf total))))
 
+(defmethod can-aquire ((self connection-pool))
+  (multiple-value-bind (total available)
+      (count-connections self)
+    (declare (ignore total))
+    (> available 0)))
+
 (defmethod connect-upto-minimum ((self connection-pool) n min)
   "We use this method to allocate up to the minimum number of connections.
    It is called once after initialize-instance and will be called again every time 
@@ -185,16 +218,15 @@
 
 
 (defmethod take-first ((self connection-pool))
-    "Take the first available connection from the pool.   If there are none, NIL is returned."
-    ;; Mutex
+  "Take the first available connection from the pool.   If there are none, NIL is returned."
+  (pool-wait self
     (let ((first (loop for conn across (connections self)
 		    if (and conn (available conn))
 		    return conn)))
-      (when first
-	(toggle first)
-	(remove-connection-from-array self (available-connections self) first)
-	(clean-connections self (available-connections self))
-	(values first))))
+      (toggle first)
+      (remove-connection-from-array self (available-connections self) first)
+      (clean-connections self (available-connections self))
+      (values first))))
 
 (defmethod aquire ((self t) (block t))
   (error 'cl-mysql-error :message "There is no available pool to aquire from!"))
@@ -209,19 +241,20 @@
   ;; First we need to make sure that we aren't under-allocated.   This can happen if a previous
   ;; pool was disconnected or if the number of min connections has changed
   ;; Mutex
-  (multiple-value-bind (total available) (count-connections self)
-    ;; After this call we should have enough available connections to take one, otherwise we will
-    ;; need to block ...
-    (connect-upto-minimum self total
-			  (if (> available 0)
-			      (min-connections self)
-			      (min 
-			       (max-connections self)
-			       (1+ total))))
-    (let ((candidate (take-first self)))
-      (when (not  candidate)
-	(error 'cl-mysql-error :message "Can't allocate any more connections!"))
-      (values candidate))))
+  (with-lock (pool-lock self)
+    (multiple-value-bind (total available) (count-connections self)
+      ;; After this call we should have enough available connections to take one, otherwise we will
+      ;; need to block ...
+      (connect-upto-minimum self total
+			    (if (> available 0)
+				(min-connections self)
+				(min 
+				 (max-connections self)
+				 (1+ total))))
+      (let ((candidate (take-first self)))
+	(when (not  candidate)
+	  (error 'cl-mysql-error :message "Can't allocate any more connections!"))
+	(values candidate)))))
 
 (defmethod aquire ((self connection) block)
   (declare (ignore block))
@@ -265,12 +298,14 @@
 (defmethod return-or-close ((self connection-pool) (conn connection))
   "Given a pool and a connection, close it if there are more than min-connections or
    return it to the pool if we have less than or equal to min-connections"
-  (let ((total (count-connections self)))
-    (if (> total (min-connections self))
-	(disconnect-from-server self conn)
-	(return-to-available conn))
-    (clean-connections self (connections self))
-    (clean-connections self (available-connections self))))
+  (with-lock (pool-lock self)
+    (let ((total (count-connections self)))
+      (if (> total (min-connections self))
+	  (disconnect-from-server self conn)
+	  (return-to-available conn))
+      (clean-connections self (connections self))
+      (clean-connections self (available-connections self)))
+    (pool-notify self)))
 
 (defmethod release ((self connection) &optional conn)
   "Convenience method to allow the release to be done with a connection"
