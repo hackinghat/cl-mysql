@@ -146,11 +146,13 @@
   (:documentation "All connections are initiated through a pool. "))
 
 (defmethod (setf max-connections) ((max-connect number) (pool connection-pool))
-  (setf (slot-value pool 'max-connections) max-connect)
+  (with-lock (pool-lock pool)
+    (setf (slot-value pool 'max-connections) max-connect))
   (pool-notify pool))
 
 (defmethod (setf min-connections) ((min-connect number) (pool connection-pool))
-  (setf (slot-value pool 'min-connections) min-connect)
+  (with-lock (pool-lock pool)
+    (setf (slot-value pool 'min-connections) min-connect))
   (pool-notify pool))
 
 (defmethod add-connection ((self connection-pool) (conn connection))
@@ -320,8 +322,8 @@
 	  (disconnect-from-server self conn)
 	  (return-to-available conn))
       (clean-connections self (connections self))
-      (clean-connections self (available-connections self)))
-    (pool-notify self)))
+      (clean-connections self (available-connections self))))
+  (pool-notify self))
 
 (defmethod release ((self connection) &optional conn)
   "Convenience method to allow the release to be done with a connection"

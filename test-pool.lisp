@@ -88,9 +88,10 @@
 	(multiple-value-bind (total available) (count-connections pool)
 	  (is (eql 3 total))
 	  (is (eql 0 available)))
-	(is (handler-case (progn (query "USE mysql" :store nil) nil)
-	      (cl-mysql-error (co) t)
-	      (error (co) nil)))
+	;; We need to resurrect this test when allow non-blocking waits ..
+	;(is (handler-case (progn (query "USE mysql" :store nil) nil)
+	;      (cl-mysql-error (co) t)
+	;      (error (co) nil)))
 	(release c))
       (multiple-value-bind (total available) (count-connections pool)
 	(is (eql 2 total))
@@ -102,7 +103,7 @@
 	(is (eql 1 available))))))
 
 (deftest test-can-aquire ()
-  (let* ((pool (connect :min-connections 1 :max-connections 3))
+  (let* ((pool (connect :min-connections 1 :max-connections 1))
 	 (conn (query "USE mysql" :store nil)))
     (is (not (can-aquire pool)))
     (release conn)
@@ -163,3 +164,20 @@
 	(count-connections pool)
       (is (eql 1 total))
       (is (eql 1 available)))))
+
+(deftest test-thread-3 ()
+  "The killer thread test.   Start 100 threads to run in the next 1-3 seconds
+   that will insert the numbers  from 1 to 100 into a table.   Join the threads
+   and then run a query  to verify that all was well.   This should demonstrate
+   whether we have a problem with locking or not."
+  (let ((conn (connect :min-connections 1 :max-connections 1)))
+    (query "DROP DATABASE IF EXISTS cl_mysql_test; CREATE DATABASE cl_mysql_test; 
+                  GRANT ALL ON cl_mysql_test.* TO USER(); FLUSH PRIVILEGES;")
+    (use "cl_mysql_test")
+    (query "CREATE TABLE X ( X INT )")
+    (let ((threads (loop for i from 1 to 100
+		      collect (generic-start-thread-in-nsecs
+			       (lambda ()
+				 (query (format nil "USE cl_mysql_test; INSERT INTO X VALUES (~D)" i) :database conn)) (1+ (random 2))))))
+      (mapcar #'sb-thread:join-thread threads)
+      (is (eql 100 (caadar (query "SELECT COUNT(*) FROM X")))))))
