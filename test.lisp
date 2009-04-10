@@ -4,7 +4,7 @@
 ;;;;
 (defpackage com.hackinghat.cl-mysql-test
   (:nicknames "CL-MYSQL-TEST")
-  (:use :cl :stefil :cl-mysql-system :cl-mysql-pool))
+  (:use :cl :stefil :cl-mysql-system))
 
 (in-package "CL-MYSQL-TEST")
 

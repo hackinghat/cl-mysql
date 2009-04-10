@@ -6,8 +6,13 @@
   (:use :cl :cffi)
   (:nicknames "CL-MYSQL-SYSTEM")
   (:export
+   ;; Classes
+   #:connection #:connection-pool
+   ;; Methods
+   #:connected #:available #:in-use #:pointer #:connection-equal
+   #:aquire #:release #:count-connections
    ;; Special vairalbes
-   #:*type-map*
+   #:*type-map* #:*last-connection*
    ;; Public functions
    #:connect #:query #:use #:disconnect #:ping #:option
    #:client-version #:server-version
