@@ -70,3 +70,6 @@
     (release conn)
     (is (contains pool (available-connections pool) conn))
     (is (contains pool (connections pool) conn))))
+
+(deftest test-return-to-available ()
+  ())
