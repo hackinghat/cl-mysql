@@ -20,7 +20,6 @@
   (:documentation "Calling aquire on a single connection returns itself, on a connection-pool it will return
    the first available connection.   Note that the pool implementation of this method could  block"))
 
-;(unintern 'release)
 (defgeneric release (connectable &optional other-args)
   (:documentation "Calling release will place the connection back into the pool.   If the pool has more
   connections than max-connections then releasing the connection will close it and deallocate it."))
@@ -32,9 +31,13 @@
    (owner-pool :type t :reader owner-pool :initarg :owner-pool))
   (:documentation "The slots necessary to manage a MySQL database connection."))
 
+(defmethod connection-equal ((self t) (other t))
+  nil)
+
 (defmethod connection-equal ((self connection) (other connection))
   "Two connections are equal if they point to the same memory location."
-  (pointer-eq (pointer self) (pointer other)))
+  (and self other
+       (pointer-eq (pointer self) (pointer other))))
 
 (defmethod connected ((self connection))
   (not (null-pointer-p (pointer self))))
@@ -141,11 +144,12 @@
     "Take the first available connection from the pool.   If there are none, NIL is returned."
     ;; Mutex
     (let ((first (loop for conn across (connections self)
-		    if (available conn)
+		    if (and conn (available conn))
 		    return conn)))
       (when first
 	(toggle first)
 	(remove-connection-from-array self (available-connections self) first)
+	(clean-connections self (available-connections self))
 	(values first))))
 
 (defmethod aquire ((self connection-pool) block)
@@ -178,7 +182,15 @@
     ;; Block on in-use?
     self))
 
+(defmethod contains ((self connection-pool) array conn)
+  (loop for c across array
+       if (connection-equal c conn)
+       return t))
+
 (defmethod return-to-available ((self connection-pool) conn)
+  (if (or (not (in-use conn))
+	  (contains self (available-connections self) conn))
+      (error 'cl-mysql-error :message "Inconsistent state! Connection is not currently in use."))
   (toggle conn)
   (vector-push-extend conn (available-connections self)))
 
@@ -186,7 +198,7 @@
   "Housekeeping to remove null connections from the end of the connections array.   Pool should be locked."
   (setf (fill-pointer array)
 	(do ((i (1- (fill-pointer array)) (decf i)))
-	    ((or (< i 0) (not (elt array i))) (max 0 i)))))
+	    ((or (< i 0) (elt array i)) (1+ i)))))
 
 (defmethod release ((self connection) &optional conn)
   "Convenience method to allow the release to be done with a connection"

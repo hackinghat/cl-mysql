@@ -185,8 +185,11 @@
 ;;; High level API
 ;;;
 (defmacro with-connection ((var &optional database) &body body)
-  `(let ((,var (or ,database (cl-mysql-pool:get-connection))))
-     ,@body))
+  (let ((conn (gensym)))
+    `(let* ((,conn (aquire (or ,database *last-database*) nil))
+	    (,var (pointer ,conn)))
+       (unwind-protect ,@body
+	 (release ,conn)))))
 
 (defun use (name &key database)
   "Equivalent to running:
@@ -341,7 +344,7 @@
    the rows affected."
   (declare (optimize (speed 3)))
   (cond ((null-pointer-p mysql-res)
-	 (cons (mysql-affected-rows (or database (cl-mysql-pool:get-connection))) nil))
+	 (cons (mysql-affected-rows database) nil))
 	(t
 	 (let ((fields (field-names-and-types mysql-res)))
 					;(print fields)

@@ -26,7 +26,13 @@
 	  (is (not (connected test-conn)))
 	  (is (not (available test-conn)))))
 
-(defmethod test-connection-equal ()
+(deftest test-connection-equal ()
+  (is (not (connection-equal
+	    (make-instance 'connection :pointer (cffi:null-pointer))
+	    nil)))
+  (is (not (connection-equal
+	    nil
+	    (make-instance 'connection :pointer (cffi:null-pointer)))))
   (is (connection-equal
        (make-instance 'connection :pointer (cffi:null-pointer))
        (make-instance 'connection :pointer (cffi:null-pointer))))
@@ -34,11 +40,11 @@
 	    (make-instance 'connection :pointer (cffi:make-pointer 1))
 	    (make-instance 'connection :pointer (cffi:null-pointer))))))
 
-(defmethod test-aquire-connection ()
-  (is (null (aquire (make-instance 'connection :in-use t))))
-  (is (aquire (make-instance 'connection :in-use nil))))
+(deftest test-aquire-connection ()
+  (is (null (aquire (make-instance 'connection :in-use t) nil)))
+  (is (aquire (make-instance 'connection :in-use nil) nil)))
 
-(defmethod test-count-connections ()
+(deftest test-count-connections ()
   (let ((pool (connect :min-connections 1 :max-connections 1)))
     (multiple-value-bind (total available) (count-connections pool)
       (is (eql 1 total))
@@ -50,4 +56,17 @@
     (release c)
     (multiple-value-bind (total available) (count-connections pool)
       (is (eql 1 total))
+      (is (eql 1 available)))
+    (release c)
+    (multiple-value-bind (total available) (count-connections pool)
+      (is (eql 1 total))
       (is (eql 1 available))))))
+
+(deftest test-contains ()
+  (let* ((pool (connect :min-connections 1 :max-connections 1))
+	 (conn (aquire pool nil)))
+    (is (not (contains pool (available-connections pool) conn)))
+    (is (contains pool (connections pool) conn))
+    (release conn)
+    (is (contains pool (available-connections pool) conn))
+    (is (contains pool (connections pool) conn))))

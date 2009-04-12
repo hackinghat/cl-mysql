@@ -6,11 +6,13 @@
   (:use :cl :cffi)
   (:nicknames "CL-MYSQL-SYSTEM")
   (:export
+   ;; Conditions
+   #:cl-mysql-error #:mysql-error
    ;; Classes
    #:connection #:connection-pool
    ;; Methods
    #:connected #:available #:in-use #:pointer #:connection-equal
-   #:aquire #:release #:count-connections
+   #:aquire #:release #:count-connections #:contains #:connections #:available-connections
    ;; Special vairalbes
    #:*type-map* #:*last-connection*
    ;; Public functions
