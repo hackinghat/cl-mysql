@@ -41,14 +41,17 @@
 	  (return-from next-result-set (setf (result-set self) nil)))))
   (let ((next-result (mysql-use-result (pointer self))))
     (error-if-null self next-result)
-    (setf (result-set-fields self)
-	  (cons (result-set-fields self)
-		(field-names-and-types next-result)))))
+    (setf
+     (result-set self) next-result
+     (result-set-fields self) (append
+			       (list (field-names-and-types next-result))
+			       (result-set-fields self)))
+    (values t)))
 
 (defmethod next-row ((self connection) &key (type-map *type-map*))
   "Retrieve and decode (according to the type map) the next row in the query.   This
    function will return NIL when the last row has been retrieved."
-  (let* ((fields-and-names (car (last (field-names-and-types (result-set self)))))
+  (let* ((fields-and-names (car (last (result-set-fields self))))
 	 (row (mysql-fetch-row (result-set self))))
     (if (null-pointer-p row)
 	(error-if-set self)

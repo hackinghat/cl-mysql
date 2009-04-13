@@ -208,11 +208,12 @@
     (is (eql 4 total-rows)))
     ;; Now do it again using a loop style
     (let ((conn (query "SELECT * FROM X; SELECT * FROM X" :store nil)))
-      (is (eql 4 (loop until (null (result-set conn))
-		      do (next-result-set conn)
-		    summing (loop for row = (next-row conn)
-			       until (null row)
-			       count row)))))
+      (unwind-protect 
+	   (is (eql 4 (loop until (next-result-set conn)
+			 summing (loop for row = (next-row conn)
+				    until (null row)
+				    count row)))))
+      (release conn))
     ;; Now do it once more to verify we haven't got any result sets left open ...
     (is (eql 2  (length (query "SELECT * FROM X; SELECT * FROM X" :store t))))
   (query "DROP DATABASE cl_mysql_test")

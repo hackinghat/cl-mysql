@@ -180,7 +180,7 @@
     (when (not (eql 0 errno))
       (error 'mysql-error 
 	     :message (mysql-error (pointer database))
-	     :error errno))))
+	     :errno errno))))
 
 ;;; High level API
 ;;;
@@ -430,3 +430,9 @@
   (elt row (position column-name field-names-and-types :test (lambda (x)
 						      (string= (car x) column-name)))))
 
+(defun force-kill ()
+  "Convenience function to clean up connections"
+  (connect)
+  (query (with-output-to-string (s)
+	   (loop for f in (cdr (list-processes))  do
+		(format s "KILL ~D;" (car f))))))
