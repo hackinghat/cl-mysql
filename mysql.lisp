@@ -164,38 +164,40 @@
 (defun error-if-non-zero (database return-value)
   (if (not (eql 0 return-value))
       (error 'mysql-error
-	     :message (mysql-error database)
-	     :errno (mysql-errno database)))
+	     :message (mysql-error (pointer database))
+	     :errno (mysql-errno (pointer database))))
   return-value)
 
 (defun error-if-null (database return-value)
   (if (null return-value)
       (error 'mysql-error
-	     :message (mysql-error database)
-	     :errno (mysql-errno database)))
+	     :message (mysql-error (pointer database))
+	     :errno (mysql-errno (pointer database))))
   return-value)
 
 (defun error-if-set (database)
-  (let ((errno (mysql-errno database)))
+  (let ((errno (mysql-errno (pointer  database))))
     (when (not (eql 0 errno))
       (error 'mysql-error 
-	     :message (mysql-error database)
+	     :message (mysql-error (pointer database))
 	     :error errno))))
 
 ;;; High level API
 ;;;
-(defmacro with-connection ((var &optional database) &body body)
-  (let ((conn (gensym)))
-    `(let* ((,conn (aquire (or ,database *last-database*) nil))
-	    (,var (pointer ,conn)))
-       (unwind-protect ,@body
-	 (release ,conn)))))
+(defmacro with-connection ((var &optional database (release t)) &body body)
+  (let ((retval (gensym)))
+    `(let* ((,var (aquire (or ,database *last-database*) nil))
+	    (,retval ()))
+       (unwind-protect (setq ,retval (progn ,@body))
+	 (when ,release
+	   (release ,var)))
+       ,retval)))
 
 (defun use (name &key database)
   "Equivalent to running:
    CL-USER> (query \"USE <name>\")"
   (with-connection (conn database)
-    (error-if-non-zero conn (mysql-select-db conn name))
+    (error-if-non-zero conn (mysql-select-db (pointer conn) name))
     (values)))
 
 (defun decode-version (int-version)
@@ -212,26 +214,26 @@
 (defun server-version (&key database)
   "Returns a three part list containing the decoded server version information"
   (with-connection (conn database)
-    (decode-version (mysql-get-server-version conn))))
+    (decode-version (mysql-get-server-version (pointer conn)))))
 
 (defun list-dbs (&key database)
   (with-connection (conn database)
-    (let ((result (error-if-null conn (mysql-list-dbs conn (null-pointer)))))
+    (let ((result (error-if-null conn (mysql-list-dbs (pointer conn) (null-pointer)))))
       (process-result-set result *type-map* conn))))
 
 (defun list-tables (&key database)
   (with-connection (conn database)
-    (let ((result (error-if-null conn (mysql-list-tables conn (null-pointer)))))
+    (let ((result (error-if-null conn (mysql-list-tables (pointer conn) (null-pointer)))))
       (process-result-set result *type-map* conn))))
 
 (defun list-fields (table &key database)
   (with-connection (conn database)
-    (let ((result (error-if-null conn (mysql-list-fields conn table (null-pointer)))))
+    (let ((result (error-if-null conn (mysql-list-fields (pointer conn) table (null-pointer)))))
       (process-result-set result *type-map* conn))))
 
 (defun list-processes (&key database)
   (with-connection (conn database)
-    (let ((result (error-if-null conn (mysql-list-processes conn))))
+    (let ((result (error-if-null conn (mysql-list-processes (pointer conn)))))
       (process-result-set result *type-map* conn))))
 
 ;;; String/Character set/Collation stuff
@@ -247,7 +249,7 @@
 	       (to-string (foreign-alloc :unsigned-char :count to-length))
 	       (return-string nil))
 	  (unwind-protect (progn
-			    (mysql-real-escape-string conn to-string from-string from-length)
+			    (mysql-real-escape-string (pointer conn) to-string from-string from-length)
 			    (setf return-string (foreign-string-to-lisp to-string)))
 	    (foreign-free to-string))
 	  (values return-string))))))
@@ -263,7 +265,7 @@
       (collation name number state)"
   (with-connection (conn database)
     (with-foreign-object (charset 'character-set)
-      (mysql-get-character-set-info conn charset)
+      (mysql-get-character-set-info (pointer conn) charset)
       (list (foreign-slot-value charset 'character-set 'csname)
 	    (foreign-slot-value charset 'character-set 'name)
 	    (foreign-slot-value charset 'character-set 'number)
@@ -271,7 +273,7 @@
 
 (defun set-character-set (csname &key database)
   (with-connection (conn database)
-    (error-if-non-zero database (mysql-set-character-set conn csname))))
+    (error-if-non-zero database (mysql-set-character-set (pointer conn) csname))))
 
 ;;; Result set functions
 ;;;
@@ -344,7 +346,7 @@
    the rows affected."
   (declare (optimize (speed 3)))
   (cond ((null-pointer-p mysql-res)
-	 (cons (mysql-affected-rows database) nil))
+	 (cons (mysql-affected-rows (pointer database)) nil))
 	(t
 	 (let ((fields (field-names-and-types mysql-res)))
 					;(print fields)
@@ -352,24 +354,7 @@
 	    (mapcar #'car fields)
 	    (result-data mysql-res type-map fields))))))
 
-(defun next-result-set (last-result &key database)
-  "Retrieve the next result set."
-  (with-connection (conn database)
-    (when last-result
-      (mysql-free-result last-result)
-      (if (not (eql 0 (mysql-next-result conn)))
-	  (return-from next-result-set nil)))
-    (error-if-null conn (mysql-use-result conn))))
 
-(defun next-row (result-set &key (type-map *type-map*) database)
-  "Retrieve and decode (according to the type map) the next row in the query.   This
-   function will return NIL when the last row has been retrieved."
-  (with-connection (conn database)
-    (let* ((fields-and-names (field-names-and-types result-set))
-	   (row (mysql-fetch-row result-set)))
-      (if (null-pointer-p row)
-	(error-if-set conn)
-	(process-row result-set row (length fields-and-names) fields-and-names type-map)))))
 
 (defun query (query &key (type-map *type-map*) database (store t))
   "For a SELECT query or stored procedure that returns data, query will return 
@@ -396,18 +381,17 @@
     or numerics that have very high precision this might not be what you want.
     In this case you could attempt to write your own conversion routine and 
     inject it into cl-mysql through the type-map."
-  (with-connection (conn database)
-    (error-if-non-zero conn (mysql-query conn query))
+  (with-connection (conn database store)
+    (error-if-non-zero conn (mysql-query (pointer conn) query))
     (if store
-      (loop for result-set = (mysql-store-result conn)
-	 nconc (list (unwind-protect
-			  (process-result-set result-set (or type-map
-							     (make-hash-table)) conn)))
+	(loop for result-set = (mysql-store-result (pointer conn))
+	 nconc (list (process-result-set result-set (or type-map (make-hash-table)) conn))
 	 until (progn
 		 (mysql-free-result result-set)
-		 (not (eql 0 (mysql-next-result conn))))))))
+		 (not (eql 0 (mysql-next-result (pointer conn))))))
+      (values conn))))
 
-(defun ping (&key database)
+(defun ping (&key database)t
   "Check whether a connection is established or not.  If :opt-reconnect is 
    set and there is no connection then MySQL's C API attempts a reconnection."
   (with-connection (conn database)

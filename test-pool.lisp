@@ -42,7 +42,10 @@
 
 (deftest test-aquire-connection ()
   (is (null (aquire (make-instance 'connection :in-use t) nil)))
-  (is (aquire (make-instance 'connection :in-use nil) nil)))
+  (is (aquire (make-instance 'connection :in-use nil) nil))
+  (is (handler-case (progn (aquire nil nil) nil)
+	(cl-mysql-error (c) t)
+	(error (c) nil))))
 
 (deftest test-count-connections ()
   (let ((pool (connect :min-connections 1 :max-connections 1)))

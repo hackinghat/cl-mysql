@@ -4,7 +4,7 @@
 ;;;;
 (in-package "CL-MYSQL-SYSTEM")
 
-(defparameter *last-database*
+(defparameter *last-database* nil
   "The last allocated connection-pool.   Note that this special is a default argument
    to a lot of the higher level API functions.")
 
@@ -28,8 +28,33 @@
   ((pointer :type t :initform (null-pointer) :accessor pointer :initarg :pointer)
    (result-set :type t :initform (null-pointer) :accessor result-set)
    (in-use :type (or null t) :initform nil :accessor in-use :initarg :in-use)
-   (owner-pool :type t :reader owner-pool :initarg :owner-pool))
+   (owner-pool :type t :reader owner-pool :initarg :owner-pool)
+   (result-set-fields :type list :initform nil :accessor result-set-fields))
   (:documentation "The slots necessary to manage a MySQL database connection."))
+
+(defmethod next-result-set ((self connection))
+  "Retrieve the next result set."
+  (let ((last-result (result-set self)))
+    (when last-result
+      (mysql-free-result last-result)
+      (if (eql 0 (mysql-next-result (pointer self)))
+	  (return-from next-result-set (setf (result-set self) nil)))))
+  (let ((next-result (mysql-use-result (pointer self))))
+    (error-if-null self next-result)
+    (setf (result-set-fields self)
+	  (cons (result-set-fields self)
+		(field-names-and-types next-result)))))
+
+(defmethod next-row ((self connection) &key (type-map *type-map*))
+  "Retrieve and decode (according to the type map) the next row in the query.   This
+   function will return NIL when the last row has been retrieved."
+  (let* ((fields-and-names (car (last (field-names-and-types (result-set self)))))
+	 (row (mysql-fetch-row (result-set self))))
+    (if (null-pointer-p row)
+	(error-if-set self)
+	(process-row (result-set self) row
+		     (length fields-and-names)
+		     fields-and-names type-map))))
 
 (defmethod connection-equal ((self t) (other t))
   nil)
@@ -67,15 +92,16 @@
   (vector-push-extend conn (available-connections self)))
 
 (defmethod remove-connection-from-array ((self connection-pool) array conn)
-  "Returns a new array with the given connection object removed.   The pool should be
-   locked before this method is called."
+  "Returns a new array with the given connection object removed (set to NIL)
+   The pool should be locked before this method is called."
   (unless (null conn)
     (map-into array
 	      (lambda (x)
 		(if (connection-equal conn x)
 		    nil
 		    x))
-	      array)))
+	      array))
+  (clean-connections self array))
 
 (defmethod connect-to-server ((self connection-pool))
   "Create a new single connection and add it to the pool."
@@ -152,6 +178,9 @@
 	(clean-connections self (available-connections self))
 	(values first))))
 
+(defmethod aquire ((self t) (block t))
+  (error 'cl-mysql-error :message "There is no available pool to aquire from!"))
+
 (defmethod aquire ((self connection-pool) block)
   "Aquire from the pool a single connection object that can be passed to higher level
    API functions like QUERY.   
@@ -173,7 +202,7 @@
 			       (1+ total))))
     (let ((candidate (take-first self)))
       (when (not  candidate)
-	(error 'cl-mysql-error "Can't allocate any more connections!"))
+	(error 'cl-mysql-error :message "Can't allocate any more connections!"))
       (values candidate))))
 
 (defmethod aquire ((self connection) block)
@@ -187,11 +216,19 @@
        if (connection-equal c conn)
        return t))
 
-(defmethod return-to-available ((self connection-pool) conn)
+(defmethod return-to-available ((self connection) &optional conn)
+  (declare (ignore conn))
+  ;; Deal with the pool
+  (return-to-available (owner-pool self) self)
+  ;; Now clean up any stateful data that could be hanging around
+  (setf (result-set self) (null-pointer)
+	(result-set-fields self) nil
+	(in-use self) nil))
+  
+(defmethod return-to-available ((self connection-pool) &optional conn)
   (if (or (not (in-use conn))
 	  (contains self (available-connections self) conn))
       (error 'cl-mysql-error :message "Inconsistent state! Connection is not currently in use."))
-  (toggle conn)
   (vector-push-extend conn (available-connections self)))
 
 (defmethod clean-connections ((self connection-pool) array)
@@ -207,12 +244,12 @@
 (defmethod release ((self connection-pool) &optional conn)
   "Release a connection back into the pool."
   (if (null conn)
-      (error 'cl-mysql-error "Internal Error: Connection must be supplied when releasing a pool object!"))
+      (error 'cl-mysql-error :message "Internal Error: Connection must be supplied when releasing a pool object!"))
   ;; Mutex 
   (let ((total (count-connections self)))
     (if (> total (max-connections self))
 	(disconnect-from-server self conn)
-	(return-to-available self conn))
+	(return-to-available conn))
     (clean-connections self (connections self))
     (clean-connections self (available-connections self))))
 
@@ -248,9 +285,12 @@
 				       :min-connections min-connections
 				       :max-connections max-connections)))
 
-(defmethod disconnect ((self connection-pool))
+(defun disconnect (&optional (database *last-database*))
+  (disconnect-all database))
+
+(defmethod disconnect-all ((self connection-pool))
   "Disconnects all the connections in the pool from the database."
   ;; Mutex
   (let ((array (subseq (connections self) 0)))
     (loop for conn across array
-       do (release self conn))))
+       do (disconnect-from-server self conn))))
