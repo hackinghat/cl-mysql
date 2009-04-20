@@ -206,8 +206,7 @@
 	      (do ((row (next-row conn) (next-row conn))
 		   (nrows 0 (incf nrows)))
 		  ((null row) nrows))))
-      (is (eql 4 total-rows))
-      (release conn)))
+      (is (eql 4 total-rows))))
     ;; Now do it again using a loop style, the code is equivalent.   This just documents
     ;; the two idioms for processing result sets.
     (let ((conn (query "SELECT * FROM X; SELECT * FROM X" :store nil)))
@@ -215,8 +214,7 @@
 	   (is (eql 4 (loop while (next-result-set conn)
 			 summing (loop for row = (next-row conn)
 				    until (null row)
-				    count row)))))
-      (release conn))
+				    count row))))))
     ;; Now do it once more to verify we haven't got any result sets left open ...
     (is (eql 2  (length (query "SELECT * FROM X; SELECT * FROM X" :store t))))
   (query "DROP DATABASE cl_mysql_test")
@@ -236,6 +234,7 @@
     (next-result-set b) (next-result-set b)
     (is (eql 100 (* (car (next-row a))
 		    (car (next-row b)))))
+    ;; Early release!
     (release a)
     (release b)
     (query "DROP DATABASE cl_mysql_test")

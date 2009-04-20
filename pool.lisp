@@ -33,7 +33,7 @@
    (use-query-active :type (or null t) :initform nil :accessor use-query-active))
   (:documentation "The slots necessary to manage a MySQL database connection."))
 
-(defmethod next-result-set ((self connection))
+(defmethod next-result-set ((self connection) &optional dont-release)
   "Retrieve the next result set.  Returns NIL when there are no more result sets."
   (let ((last-result (result-set self))
 	(affected-rows 0))
@@ -41,11 +41,15 @@
     (unless (null-pointer-p last-result)
       (setf affected-rows (mysql-affected-rows (pointer self)))
       (mysql-free-result last-result))
-    ;; Now check if there are more results ...
-    (if (not (eql 0 (mysql-next-result (pointer self))))
+    ;; Now check if this is not the first result whether there are
+    ;; more results
+    (if (and (> (length (result-set-fields self)) 0)
+	     (not (eql 0 (mysql-next-result (pointer self)))))
 	(progn (setf (result-set self) (null-pointer))
 	       (setf (result-set-fields self) nil)
 	       (setf (use-query-active self) nil)
+	       (unless dont-release
+		   (return-or-close (owner-pool self) self))
 	       (return-from next-result-set
 		 (values nil affected-rows))))
     ;; Now advance into the next result set.
@@ -62,7 +66,7 @@
   "Retrieve and decode (according to the type map) the next row in the query.   This
    function will return NIL when the last row has been retrieved."
   (unless (null-pointer-p (result-set self))
-    (let* ((fields-and-names (car (last (result-set-fields self))))
+    (let* ((fields-and-names (car (result-set-fields self)))
 	   (row (mysql-fetch-row (result-set self))))
       (if (null-pointer-p row)
 	  (error-if-set self)
@@ -209,7 +213,7 @@
     ;; After this call we should have enough available connections to take one, otherwise we will
     ;; need to block ...
     (connect-upto-minimum self total
-			  (if (> 0 available)
+			  (if (> available 0)
 			      (min-connections self)
 			      (min 
 			       (max-connections self)
@@ -240,6 +244,7 @@
 	(in-use self) nil))
   
 (defmethod return-to-available ((self connection-pool) &optional conn)
+;  (inspect self)
   (if (or (not (in-use conn))
 	  (contains self (available-connections self) conn))
       (error 'cl-mysql-error :message "Inconsistent state! Connection is not currently in use."))
@@ -253,8 +258,19 @@
 
 (defmethod consume-unused-results ((self connection))
   "If a client attempts to release a connection without consuming all the results then we take care of that
-   for them."
-  (loop while (next-result-set self)))
+   for them.  Because we are probably being called from release don't also auto-release when we reach the 
+   last result!"
+  (loop while (next-result-set self t)))
+
+(defmethod return-or-close ((self connection-pool) (conn connection))
+  "Given a pool and a connection, close it if there are more than min-connections or
+   return it to the pool if we have less than or equal to min-connections"
+  (let ((total (count-connections self)))
+    (if (> total (min-connections self))
+	(disconnect-from-server self conn)
+	(return-to-available conn))
+    (clean-connections self (connections self))
+    (clean-connections self (available-connections self))))
 
 (defmethod release ((self connection) &optional conn)
   "Convenience method to allow the release to be done with a connection"
@@ -266,12 +282,7 @@
       (error 'cl-mysql-error :message "Internal Error: Connection must be supplied when releasing a pool object!"))
   (if (use-query-active conn)
       (consume-unused-results conn))
-  (let ((total (count-connections self)))
-    (if (> total (max-connections self))
-	(disconnect-from-server self conn)
-	(return-to-available conn))
-    (clean-connections self (connections self))
-    (clean-connections self (available-connections self)))
+  (return-or-close self conn)
   (values))
 
 (defun connect (&key host user password database port socket
