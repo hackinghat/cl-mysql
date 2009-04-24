@@ -132,7 +132,7 @@
                 st SET ('one','two'),
                 -- Geomerty types
                 ge GEOMETRY)")
-  (is (eq 2 (length (list-tables))))
+  (is (eql 1 (length (list-tables))))
   (query "INSERT INTO test_table (bt, ti, si, mi, i, bi, f, r, dp, d, n, 
                                   dt, da, tm, yr, ch, vc, bn, vb, bb, tb,
                                   mb, lb, tt, tx, mt, lt, en, st, ge, bg) 
