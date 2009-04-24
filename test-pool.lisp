@@ -4,6 +4,9 @@
 ;;;;
 (in-package "CL-MYSQL-TEST")
 
+(defvar *conn* (connect :min-connections 1 :max-connections 1))
+
+
 (defsuite* test-pool)
 
 (deftest test-connection ()
@@ -170,14 +173,13 @@
    that will insert the numbers  from 1 to 100 into a table.   Join the threads
    and then run a query  to verify that all was well.   This should demonstrate
    whether we have a problem with locking or not."
-  (let ((conn (connect :min-connections 1 :max-connections 1)))
-    (query "DROP DATABASE IF EXISTS cl_mysql_test; CREATE DATABASE cl_mysql_test; 
+  (query "DROP DATABASE IF EXISTS cl_mysql_test; CREATE DATABASE cl_mysql_test; 
                   GRANT ALL ON cl_mysql_test.* TO USER(); FLUSH PRIVILEGES;")
-    (use "cl_mysql_test")
-    (query "CREATE TABLE X ( X INT )")
-    (let ((threads (loop for i from 1 to 100
-		      collect (generic-start-thread-in-nsecs
-			       (lambda ()
-				 (query (format nil "USE cl_mysql_test; INSERT INTO X VALUES (~D)" i) :database conn)) (1+ (random 2))))))
-      (mapcar #'sb-thread:join-thread threads)
-      (is (eql 100 (caadar (query "SELECT COUNT(*) FROM X")))))))
+  (use "cl_mysql_test" :database *conn*)
+  (query "CREATE TABLE X ( X INT )" :database *conn*)
+  (let ((threads (loop for i from 1 to 100
+		    collect (generic-start-thread-in-nsecs
+			     (lambda ()
+			       (query (format nil "USE cl_mysql_test; INSERT INTO X VALUES (~D)" i) :database *conn*)) (1+ (random 2))))))
+    (mapcar #'sb-thread:join-thread threads)
+    (is (eql 100 (caadar (query "SELECT COUNT(*) FROM X"))))))
