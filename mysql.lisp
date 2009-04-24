@@ -232,9 +232,16 @@
       (process-result-set result *type-map* conn))))
 
 (defun list-processes (&key database)
-  (with-connection (conn database)
-    (let ((result (error-if-null conn (mysql-list-processes (pointer conn)))))
-      (process-result-set result *type-map* conn))))
+  (let ((result-2
+	 (with-connection (conn database)
+	   (let ((result (mysql-list-processes (pointer conn))))
+	     (error-if-null conn result)
+	     (setf (result-set conn) result)
+	     (cons
+	      (process-result-set conn *type-map*)
+	      (result-set-fields conn))))))
+    (values (car result-2)
+	    (cadr result-2))))
 
 ;;; String/Character set/Collation stuff
 ;;;
@@ -277,19 +284,6 @@
 
 ;;; Result set functions
 ;;;
-(defun field-names-and-types (mysql-res)
-  "Retrieve from a MYSQL_RES a list of cons ((<field name> <field type>)*) "
-  (unless (null-pointer-p mysql-res)
-    (let ((num-fields (1- (mysql-num-fields mysql-res)))
-	  (fields (mysql-fetch-fields mysql-res)))
-      (loop for i from 0 to num-fields
-	 collect (let ((mref (mem-aref fields 'mysql-field i)))
-		   (list
-		    (foreign-slot-value mref 'mysql-field 'name)
-		    (foreign-enum-keyword
-		     'enum-field-types
-		     (foreign-slot-value mref 'mysql-field 'type))
-		    (foreign-slot-value mref 'mysql-field 'flags)))))))
 
 (defparameter *binary-types* #(:BIT :BINARY :VARBINARY :GEOMETRY))
 (declaim (inline extract-field process-row))
@@ -332,29 +326,6 @@
        collect (extract-field row i
 			      (mem-ref mysql-lens :unsigned-long i) type-map f))))
 
-(defun result-data (mysql-res type-map field-names-and-types)
-  "Internal function that processes a result set and returns all the data.
-   If field-names-and-types is NIL the raw (string) data is returned"
-  (declare (optimize (speed 3))
-	   (ftype (function (t t fixnum list (or t null)) list) process-row))
-  (let ((num-fields (mysql-num-fields mysql-res)))
-    (loop for row = (mysql-fetch-row mysql-res)
-       until (null-pointer-p row)
-       collect (process-row mysql-res row num-fields field-names-and-types type-map))))
-
-(defun process-result-set (mysql-res type-map database)
-  "Result set will be NULL if the command did not return any results.   In this case we return a cons
-   the rows affected."
-  (declare (optimize (speed 3)))
-  (cond ((null-pointer-p mysql-res)
-	 (cons (mysql-affected-rows (pointer database)) nil))
-	(t
-	 (let ((fields (field-names-and-types mysql-res)))
-					;(print fields)
-	   (cons
-	    (mapcar #'car fields)
-	    (result-data mysql-res type-map fields))))))
-
 
 
 (defun query (query &key (type-map *type-map*) database (store t))
@@ -382,17 +353,22 @@
     or numerics that have very high precision this might not be what you want.
     In this case you could attempt to write your own conversion routine and 
     inject it into cl-mysql through the type-map."
-  (with-connection (conn database store)
-    (error-if-non-zero conn (mysql-query (pointer conn) query))
-    (cond (store
-	   (loop for result-set = (mysql-store-result (pointer conn))
-	      nconc (list (process-result-set result-set (or type-map (make-hash-table)) conn))
-	      until (progn
-		      (mysql-free-result result-set)
-		      (not (eql 0 (mysql-next-result (pointer conn)))))))
-	  (t
-	   (setf (use-query-active conn) t)
-	   (values conn)))))
+  (let ((retval
+	 (with-connection (conn database store)
+	   (error-if-non-zero conn (mysql-query (pointer conn) query))
+	   (cond (store
+		  (list
+		   (loop
+		      while (next-result-set conn :store t :dont-release t)
+		      nconc (list (process-result-set conn
+						      (or type-map (make-hash-table)))))
+		   (princ (result-set-fields conn))))
+		 (t
+		  (setf (use-query-active conn) t)
+		  (values conn))))))
+    (princ retval)
+    (values (car retval)
+	    (cadr retval))))
 
 (defun ping (&key database)t
   "Check whether a connection is established or not.  If :opt-reconnect is 

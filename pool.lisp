@@ -33,7 +33,58 @@
    (use-query-active :type (or null t) :initform nil :accessor use-query-active))
   (:documentation "The slots necessary to manage a MySQL database connection."))
 
-(defmethod next-result-set ((self connection) &optional dont-release)
+(defmethod (setf result-set) ((result-set t) (conn connection))
+  (setf (slot-value conn 'result-set) result-set)
+  (set-field-names-and-types conn))
+
+(defmethod process-result-set ((self connection) type-map)
+  "Result set will be NULL if the command did not return any results.   In this case we return a cons
+   the rows affected."
+  (declare (optimize (speed 3)))
+  (cond ((null-pointer-p (result-set self))
+	 (cons (mysql-affected-rows (pointer self)) nil))
+	(t
+	 (result-data self type-map))))
+
+(defmethod set-field-names-and-types ((self connection))
+  "Retrieve from a MYSQL_RES a list of cons ((<field name> <field type>)*) "
+  (let ((mysql-res (result-set self)))
+    (unless (null-pointer-p mysql-res)
+      (let* ((num-fields (1- (mysql-num-fields mysql-res)))
+	     (fields (mysql-fetch-fields mysql-res))
+	     (extracted-fields
+	      (loop for i from 0 to num-fields
+		 collect (let ((mref (mem-aref fields 'mysql-field i)))
+			   (list
+			    (foreign-slot-value mref 'mysql-field 'name)
+			    (foreign-enum-keyword
+			     'enum-field-types
+			     (foreign-slot-value mref 'mysql-field 'type))
+			    (foreign-slot-value mref 'mysql-field 'flags))))))
+	(setf (result-set-fields self)
+	      (append
+	       (list extracted-fields)
+	       (result-set-fields self)))))))
+
+(defmethod result-data ((self connection) type-map)
+  "Internal function that processes a result set and returns all the data.
+   If field-names-and-types is NIL the raw (string) data is returned"
+  (declare (optimize (speed 3))
+	   (ftype (function (t t fixnum list (or t null)) list) process-row))
+  (let* ((mysql-res (result-set self))
+	 (num-fields (mysql-num-fields mysql-res)))
+    (loop for row = (mysql-fetch-row mysql-res)
+       until (null-pointer-p row)
+       collect (process-row mysql-res
+			    row
+			    num-fields
+			    (car (result-set-fields self))
+			    type-map))))
+
+(defmethod assign-result-set ((self connection) result-set)
+  )
+
+(defmethod next-result-set ((self connection) &key dont-release store)
   "Retrieve the next result set.  Returns NIL when there are no more result sets."
   (let ((last-result (result-set self))
 	(affected-rows 0))
@@ -45,21 +96,16 @@
     ;; more results
     (if (and (> (length (result-set-fields self)) 0)
 	     (not (eql 0 (mysql-next-result (pointer self)))))
-	(progn (setf (result-set self) (null-pointer))
-	       (setf (result-set-fields self) nil)
-	       (setf (use-query-active self) nil)
-	       (unless dont-release
-		   (return-or-close (owner-pool self) self))
+	(progn (unless dont-release
+		 (return-or-close (owner-pool self) self))
 	       (return-from next-result-set
 		 (values nil affected-rows))))
     ;; Now advance into the next result set.
-    (let ((next-result (mysql-use-result (pointer self))))
-      (error-if-null self next-result)
-      (setf
-       (result-set self) next-result
-       (result-set-fields self) (append
-				 (list (field-names-and-types next-result))
-				 (result-set-fields self)))
+    (let ((result-set (if store
+			   (mysql-store-result (pointer self))
+			   (mysql-use-result (pointer self)))))
+      (error-if-null self result-set)
+      (setf (result-set self) result-set)
       (values t affected-rows))))
 
 (defmethod next-row ((self connection) &key (type-map *type-map*))
@@ -316,6 +362,12 @@
 (defmethod return-or-close ((self connection-pool) (conn connection))
   "Given a pool and a connection, close it if there are more than min-connections or
    return it to the pool if we have less than or equal to min-connections"
+
+  ;; These don't strictly need to be locked because we make no guarantees
+  ;; about the thread safety of a single connection
+  (setf (slot-value conn 'result-set) (null-pointer))
+  (setf (result-set-fields conn) nil)
+  (setf (use-query-active conn) nil)
   (with-lock (pool-lock self)
     (let ((total (count-connections self)))
       (if (> total (min-connections self))

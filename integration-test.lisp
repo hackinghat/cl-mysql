@@ -24,7 +24,7 @@
 (defun long-test ()
   "Loop from 1 to"
   (setup-test-database 1 2)
-  (loop for i from 1 to 3600
+  (loop for i from 1 to 20
      do (progn
 	  (sleep 0.25)
 	  (generic-start-thread-in-nsecs 
