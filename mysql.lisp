@@ -169,11 +169,15 @@
   return-value)
 
 (defun error-if-null (database return-value)
-  (if (null return-value)
+  (if (null-pointer-p return-value)
       (error 'mysql-error
 	     :message (mysql-error (pointer database))
 	     :errno (mysql-errno (pointer database))))
   return-value)
+
+(defun error-if-null-with-fields (database return-value)
+  (if (> (mysql-field-count (pointer database)) 0)
+      (error-if-null database return-value)))
 
 (defun error-if-set (database)
   (let ((errno (mysql-errno (pointer  database))))
@@ -216,32 +220,36 @@
   (with-connection (conn database)
     (decode-version (mysql-get-server-version (pointer conn)))))
 
+(defun single-result-set (conn fn &rest args)
+  "MySQL provides a class of functions that just process a single result set.  
+   Note that we won't explicity free the result set because return-or-close
+   will do the cleanup for us."
+  (let ((result (apply fn args)))
+    (error-if-null conn result)
+    (setf (result-set conn) result)
+    (cons
+     (process-result-set conn *type-map*)
+     (result-set-fields conn))))
+
 (defun list-dbs (&key database)
   (with-connection (conn database)
-    (let ((result (error-if-null conn (mysql-list-dbs (pointer conn) (null-pointer)))))
-      (process-result-set result *type-map* conn))))
-
+    (single-result-set conn (lambda ()
+			      (mysql-list-dbs (pointer conn)
+					      (null-pointer))))))
 (defun list-tables (&key database)
   (with-connection (conn database)
-    (let ((result (error-if-null conn (mysql-list-tables (pointer conn) (null-pointer)))))
-      (process-result-set result *type-map* conn))))
+    (single-result-set conn (lambda ()
+			      (mysql-list-tables (pointer conn) (null-pointer))))))
 
 (defun list-fields (table &key database)
   (with-connection (conn database)
-    (let ((result (error-if-null conn (mysql-list-fields (pointer conn) table (null-pointer)))))
-      (process-result-set result *type-map* conn))))
+    (single-result-set conn (lambda ()
+			      (mysql-list-fields (pointer conn) table (null-pointer))))))
 
 (defun list-processes (&key database)
-  (let ((result-2
-	 (with-connection (conn database)
-	   (let ((result (mysql-list-processes (pointer conn))))
-	     (error-if-null conn result)
-	     (setf (result-set conn) result)
-	     (cons
-	      (process-result-set conn *type-map*)
-	      (result-set-fields conn))))))
-    (values (car result-2)
-	    (cadr result-2))))
+  (with-connection (conn database)
+    (single-result-set conn (lambda ()
+			      (mysql-list-processes (pointer conn))))))
 
 ;;; String/Character set/Collation stuff
 ;;;
@@ -353,22 +361,17 @@
     or numerics that have very high precision this might not be what you want.
     In this case you could attempt to write your own conversion routine and 
     inject it into cl-mysql through the type-map."
-  (let ((retval
-	 (with-connection (conn database store)
-	   (error-if-non-zero conn (mysql-query (pointer conn) query))
-	   (cond (store
-		  (list
-		   (loop
-		      while (next-result-set conn :store t :dont-release t)
-		      nconc (list (process-result-set conn
-						      (or type-map (make-hash-table)))))
-		   (princ (result-set-fields conn))))
-		 (t
-		  (setf (use-query-active conn) t)
-		  (values conn))))))
-    (princ retval)
-    (values (car retval)
-	    (cadr retval))))
+  (with-connection (conn database store)
+    (error-if-non-zero conn (mysql-query (pointer conn) query))
+    (cond (store
+	   (loop
+	      while (next-result-set conn :store t :dont-release t)
+	      nconc (list (list (process-result-set conn
+						    (or type-map (make-hash-table)))
+				(car (result-set-fields conn))))))
+	  (t
+	   (setf (use-query-active conn) t)
+	   (values conn)))))
 
 (defun ping (&key database)t
   "Check whether a connection is established or not.  If :opt-reconnect is 
@@ -413,5 +416,5 @@
   "Convenience function to clean up connections"
   (connect)
   (query (with-output-to-string (s)
-	   (loop for f in (cdr (list-processes))  do
+	   (loop for f in (car (list-processes))  do
 		(format s "KILL ~D;" (car f))))))

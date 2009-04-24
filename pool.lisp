@@ -49,22 +49,24 @@
 (defmethod set-field-names-and-types ((self connection))
   "Retrieve from a MYSQL_RES a list of cons ((<field name> <field type>)*) "
   (let ((mysql-res (result-set self)))
-    (unless (null-pointer-p mysql-res)
-      (let* ((num-fields (1- (mysql-num-fields mysql-res)))
-	     (fields (mysql-fetch-fields mysql-res))
-	     (extracted-fields
-	      (loop for i from 0 to num-fields
-		 collect (let ((mref (mem-aref fields 'mysql-field i)))
-			   (list
-			    (foreign-slot-value mref 'mysql-field 'name)
-			    (foreign-enum-keyword
-			     'enum-field-types
-			     (foreign-slot-value mref 'mysql-field 'type))
-			    (foreign-slot-value mref 'mysql-field 'flags))))))
+    (if (null-pointer-p mysql-res)
 	(setf (result-set-fields self)
-	      (append
-	       (list extracted-fields)
-	       (result-set-fields self)))))))
+	      (append (list nil) (result-set-fields self)))
+	(let* ((num-fields (1- (mysql-num-fields mysql-res)))
+	       (fields (mysql-fetch-fields mysql-res))
+	       (extracted-fields
+		(loop for i from 0 to num-fields
+		   collect (let ((mref (mem-aref fields 'mysql-field i)))
+			     (list
+			      (foreign-slot-value mref 'mysql-field 'name)
+			      (foreign-enum-keyword
+			       'enum-field-types
+			       (foreign-slot-value mref 'mysql-field 'type))
+			      (foreign-slot-value mref 'mysql-field 'flags))))))
+	  (setf (result-set-fields self)
+		(append
+		 (list extracted-fields)
+		 (result-set-fields self)))))))
 
 (defmethod result-data ((self connection) type-map)
   "Internal function that processes a result set and returns all the data.
@@ -81,9 +83,6 @@
 			    (car (result-set-fields self))
 			    type-map))))
 
-(defmethod assign-result-set ((self connection) result-set)
-  )
-
 (defmethod next-result-set ((self connection) &key dont-release store)
   "Retrieve the next result set.  Returns NIL when there are no more result sets."
   (let ((last-result (result-set self))
@@ -91,7 +90,8 @@
     ;; Firstly free any prior results
     (unless (null-pointer-p last-result)
       (setf affected-rows (mysql-affected-rows (pointer self)))
-      (mysql-free-result last-result))
+      (mysql-free-result last-result)
+      (setf (slot-value self 'result-set) (null-pointer)))
     ;; Now check if this is not the first result whether there are
     ;; more results
     (if (and (> (length (result-set-fields self)) 0)
@@ -104,7 +104,7 @@
     (let ((result-set (if store
 			   (mysql-store-result (pointer self))
 			   (mysql-use-result (pointer self)))))
-      (error-if-null self result-set)
+      (error-if-null-with-fields self result-set)
       (setf (result-set self) result-set)
       (values t affected-rows))))
 
@@ -357,7 +357,7 @@
   "If a client attempts to release a connection without consuming all the results then we take care of that
    for them.  Because we are probably being called from release don't also auto-release when we reach the 
    last result!"
-  (loop while (next-result-set self t)))
+  (loop while (next-result-set self :dont-release t)))
 
 (defmethod return-or-close ((self connection-pool) (conn connection))
   "Given a pool and a connection, close it if there are more than min-connections or
@@ -365,6 +365,8 @@
 
   ;; These don't strictly need to be locked because we make no guarantees
   ;; about the thread safety of a single connection
+  (unless (null-pointer-p (result-set conn))
+    (mysql-free-result (result-set conn)))
   (setf (slot-value conn 'result-set) (null-pointer))
   (setf (result-set-fields conn) nil)
   (setf (use-query-active conn) nil)
@@ -376,6 +378,7 @@
       (clean-connections self (connections self))
       (clean-connections self (available-connections self))))
   (pool-notify self))
+
 
 (defmethod release ((self connection) &optional conn)
   "Convenience method to allow the release to be done with a connection"
