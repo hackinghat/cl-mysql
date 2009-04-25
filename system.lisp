@@ -21,7 +21,7 @@
    #:client-version #:server-version
    #:list-dbs #:list-tables #:list-processes #:list-fields
    #:escape-string
-   #:next-result-set #:next-row
+   #:next-result-set #:next-row #:nth-row #:with-rows
    ;; Constants
    #:+client-compress+  #:+client-found-rows+    #:+client-ignore-sigpipe+
    #:+client-ignore-space+  #:+client-interactive+ #:+client-local-files+

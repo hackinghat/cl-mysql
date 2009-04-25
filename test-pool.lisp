@@ -174,7 +174,7 @@
    and then run a query  to verify that all was well.   This should demonstrate
    whether we have a problem with locking or not."
   (query "DROP DATABASE IF EXISTS cl_mysql_test; CREATE DATABASE cl_mysql_test; 
-                  GRANT ALL ON cl_mysql_test.* TO USER(); FLUSH PRIVILEGES;")
+                  GRANT ALL ON cl_mysql_test.* TO USER(); FLUSH PRIVILEGES;" :database *conn*)
   (use "cl_mysql_test" :database *conn*)
   (query "CREATE TABLE X ( X INT )" :database *conn*)
   (let ((threads (loop for i from 1 to 100
@@ -182,4 +182,4 @@
 			     (lambda ()
 			       (query (format nil "USE cl_mysql_test; INSERT INTO X VALUES (~D)" i) :database *conn*)) (1+ (random 2))))))
     (mapcar #'sb-thread:join-thread threads)
-    (is (eql 100 (caadar (query "SELECT COUNT(*) FROM X"))))))
+    (is (eql 100 (caaaar (query "SELECT COUNT(*) FROM X" :database *conn*))))))

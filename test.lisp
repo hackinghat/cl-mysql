@@ -142,7 +142,7 @@
                   12345678901234567890123456789012345678901234567890123456789012345)")
   ;; Now confirm that the decoding via the type-maps is as we expect ... this
   ;; pretty much completes our integration test at a broad level
-  (let ((result (second (first (query "SELECT * FROM test_table")))))
+  (let ((result (caaar (query "SELECT * FROM test_table"))))
     (is (equalp #(32) (first result)))
     (is (eql 255 (second result)))
     (is (eql -32768 (third result)))
@@ -189,6 +189,10 @@
 					    (code-char 10)
 					    (code-char 13)))))
   (disconnect))
+
+(deftest test-nth-row ()
+  (is (equalp '(100) (nth-row '((((100)))) 0)))
+  (is (null (nth-row nil 10 10))))
 
 (deftest test-use-result-1 ()
   "Test out the self-service result set stuff.  It works but it's a bit tricky to build

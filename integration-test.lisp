@@ -21,15 +21,19 @@
   (use "cl_mysql_test" :database *conn*)
   (query "CREATE TABLE X ( X INT, T TIMESTAMP DEFAULT CURRENT_TIMESTAMP )" :database *conn*))
 
-(defun long-test ()
+(defun long-test (n)
   "Loop from 1 to"
   (setup-test-database 1 2)
-  (loop for i from 1 to 20
-     do (progn
-	  (sleep 0.25)
-	  (generic-start-thread-in-nsecs 
-	   (lambda ()
-	     (query
-	      (format nil  "USE cl_mysql_test; INSERT INTO X (X)  VALUES (~D)" (z))
-	      :database *conn*)) (random 5))
-	  (princ "."))))
+  (mapcar #'sb-thread:join-thread
+	  (loop for i from 1 to n
+	     collect (progn
+		       (sleep  0.01)
+		       (princ ".")
+		       (generic-start-thread-in-nsecs 
+			(lambda ()
+			  (query
+			   (format nil  "USE cl_mysql_test; INSERT INTO X (X)  VALUES (~D)" (z))
+			   :database *conn*)) (random 5)))))
+  (unless (equalp (/ (+ n 1) 2)
+		  (first (nth-row (query "SELECT AVG(X) FROM X" :database *conn*) 0)))
+    (error "Long test didn't have correct result!")))

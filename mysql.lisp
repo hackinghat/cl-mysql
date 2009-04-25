@@ -227,9 +227,9 @@
   (let ((result (apply fn args)))
     (error-if-null conn result)
     (setf (result-set conn) result)
-    (cons
-     (process-result-set conn *type-map*)
-     (result-set-fields conn))))
+    (list (cons
+	   (process-result-set conn *type-map*)
+	   (result-set-fields conn)))))
 
 (defun list-dbs (&key database)
   (with-connection (conn database)
@@ -413,8 +413,40 @@
 						      (string= (car x) column-name)))))
 
 (defun force-kill ()
-  "Convenience function to clean up connections"
+  "Internal convenience function to clean up connections"
   (connect)
   (query (with-output-to-string (s)
 	   (loop for f in (car (list-processes))  do
 		(format s "KILL ~D;" (car f))))))
+
+;;; Convenience functions for accessing results
+
+(defun nth-row (result-set-list n &optional nth-result-set)
+  (let ((row (nth n (first (nth (or nth-result-set 0)
+			    result-set-list)))))
+    (typecase row
+      (number row)
+      (t row))))
+
+(defmacro with-rows ((var-row query-string
+			  &key
+			   (var-result (gensym))
+			   (database *last-database*)
+			   (type-map *type-map*))
+		     &body body)
+  "Takes a query-string and iterates over the result sets assigning
+   var-row to each individual row.  If you supply var-result it will
+   hold the result set sequence number.   This macro generates code 
+   that does not store the complete result so should be suitable for
+   working with very large data sets."
+  `(let ((connection (query ,query-string
+			    :type-map ,type-map
+			    :database ,database
+			    :store nil))
+	 (,var-result 0))
+    (loop while (next-result-set connection)
+	 do (progn
+	      (loop for ,var-row = (next-row connection :type-map ,type-map)
+		 until (null,var-row)
+		 do (progn ,@body))
+	      (incf ,var-result)))))

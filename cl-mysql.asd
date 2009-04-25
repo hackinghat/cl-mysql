@@ -16,6 +16,8 @@
 		      (intern "TEST" :cl-mysql-test))))
   :serial t
   :components ((:file "system")
+	       (:file "thread")
+	       (:file "connection")
 	       (:file "pool")
 	       (:file "mysql")
 	       (:file "package"))
