@@ -2,7 +2,7 @@
 
 PWD=`pwd`
 DIR=`basename ${PWD}`
-RELEASE_VERSION=0.1
+RELEASE_VERSION=0.2
 
 cd ..
 ln -sf ${DIR} ${DIR}_${RELEASE_VERSION}

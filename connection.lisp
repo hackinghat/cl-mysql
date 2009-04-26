@@ -98,11 +98,11 @@
    set by setting :store T.   However, you cannot then use next-row because
    you must process the entire result set in one go.
  
-   CL-USER> (query \"SELECT ...\" :store nil)
+   <pre><code>CL-USER> (query \"SELECT ...\" :store nil)
    CL-USER> (next-result-set *)
    T
    CL-USER> (next-row **)
-   ...
+   ...</code></pre>
 "
   (let ((last-result (result-set self))
 	(affected-rows 0))

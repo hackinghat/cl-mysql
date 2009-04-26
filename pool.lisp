@@ -256,14 +256,14 @@
    compression between client-and-server and also enable multiple-result sets 
    if possible.
 
-   CL-USER> (connect)
+   <pre><code>CL-USER> (connect)</code></pre>
 
-   If unsuccesful connect will raise a MYSQL-ERROR, otherwise it will place 
+   If unsuccesful connect will raise a <strong>CL-MYSQL-ERROR</strong>, otherwise it will place 
    the connection into a pool, note that all connections are pool-able, 
    a single connection is simply the special case of a pool with only one 
    connection.  
 
-   The pool has two slots, min-connections and max-connections. There will 
+   The pool has two slots, <strong>min-connections</strong> and <srong>max-connections</strong>. There will 
    always be min-connections available in the pool.   If you are using all
    min-connections and max-connections is greater than min-connections,
    the pool will continue to allocate connections until max-connections are
@@ -274,7 +274,7 @@
    than min-connections.
 
    The last  allocated pool object is placed into a special variable 
-   *last-database* which is defaulted from the higher level API functions."
+   <strong>*last-database*</strong> which is defaulted from the higher level API functions."
   (setf *last-database* (make-instance 'connection-pool
 				       :hostname host
 				       :username user
