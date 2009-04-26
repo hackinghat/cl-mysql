@@ -121,8 +121,6 @@
     (+ (string-to-date (subseq string 0 10))
        (string-to-seconds (subseq string 11)))))
 
-(defparameter *type-map* (make-hash-table))
-
 (eval-when (:load-toplevel)
   (mapcar (lambda (map)
 	    (setf (gethash (first map) *type-map*) (second map)))
@@ -349,18 +347,28 @@
                    INSERT INTO a (a) VALUES (1); DELETE FROM a; DROP TABLE a\")
     ((0) (1) (1) (0))</code></pre>
 
-    The type-map, if set will alter the decoding into CL types.   If you set this to
-    nil it will have the effect of disabling all CL type conversions and return
-    either character or binary data only.   This might be useful for performance reasons, (cl-mysql 
+    The type-map, if set will alter the decoding into CL types.   If you set 
+    this to nil it will have the effect of disabling all CL type conversions 
+    and return  either character or binary data only.   
+
+    This might be useful for performance reasons, (cl-mysql 
     is much faster when it doesn't need to translate types) but it also might 
     be all you need.   Consider for instance if you're displaying a lot of 
     numerics on a web-page.    If you do not need to convert the data into
     floats/integers before displaying them on a page then raw could be useful 
-    here too.  Finally, <strong>cl-mysql</strong> attempts to convert all 
-    numeric types to their closest CL representation.   For very large numerics,
-    or numerics that have very high precision this might not be what you want.
-    In this case you could attempt to write your own conversion routine and 
-    inject it into cl-mysql through the type-map."
+    here too.  cl-mysql attempts to convert all numeric types to their closest 
+    CL representation.   For very large numerics, or numerics that have very 
+    high precision this might not be what you want.  In this case you could 
+    attempt to write your own conversion routine and inject it into cl-mysql 
+    through the type-map.
+ 
+    If :store is T query returns a list of result sets.   Each result set is a 
+    list with the first element set to the data and the second elements set to
+    the column data.   Since this structure can be a little awkward to handle 
+    you can use nth-row to manipulate the structure more sanely.
+
+    If :store is NIL query returns the allocated connection object.  You should
+    use next-result-set and next-row to step through the results."
   (with-connection (conn database store)
     (error-if-non-zero conn (mysql-query (pointer conn) query))
     (cond (store

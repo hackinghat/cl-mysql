@@ -10,7 +10,7 @@
 	  #:client-version #:server-version
 	  #:list-dbs #:list-tables #:list-processes #:list-fields
 	  #:escape-string #:next-result-set #:next-row #:*type-map*
-	  #:nth-row #:with-rows
+	  #:nth-row #:with-rows #:result-set-fields #:process-result-set
 	  #:opt-connect-timeout #:opt-compress #:opt-named-pipe
 	  #:init-command #:read-default-file #:read-default-group
           #:+client-compress+  #:+client-found-rows+    #:+client-ignore-sigpipe+
@@ -28,7 +28,7 @@
 	   #:client-version #:server-version
 	   #:list-dbs #:list-tables #:list-processes #:list-fields
 	   #:escape-string #:next-result-set #:next-row #:*type-map*
-     	   #:nth-row #:with-rows
+     	   #:nth-row #:with-rows #:result-set-fields #:process-result-set
 	   #:+client-compress+  #:+client-found-rows+    #:+client-ignore-sigpipe+
 	   #:+client-ignore-space+  #:+client-interactive+ #:+client-local-files+
 	   #:+client-multi-statements+  #:+client-multi-results+  #:+client-no-schema+

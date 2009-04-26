@@ -4,6 +4,8 @@
 ;;;;
 (in-package "CL-MYSQL-SYSTEM")
 
+(defparameter *type-map* (make-hash-table))
+
 (defclass connectable ()
   ()
   (:documentation "The base class of connectability.   CL-MYSQL functions operate on a 
@@ -32,8 +34,10 @@
   (set-field-names-and-types conn))
 
 (defmethod process-result-set ((self connection) type-map)
-  "Result set will be NULL if the command did not return any results.   In this case we return a cons
-   the rows affected."
+  "Returns a CONS of all the data in the result set.   Note that this method
+   should only be called by the client if you originally sent :store NIL to 
+   query but then set :store to T when calling next-result-set."
+
   (declare (optimize (speed 3)))
   (cond ((null-pointer-p (result-set self))
 	 (cons (mysql-affected-rows (pointer self)) nil))
@@ -78,7 +82,28 @@
 			    type-map))))
 
 (defmethod next-result-set ((self connection) &key dont-release store)
-  "Retrieve the next result set.  Returns NIL when there are no more result sets."
+  "Position for the the next result set.  Returns T if there is a result
+   set to process and NIL when the last result set has been passed.
+
+   sets.  Use this method with (query \"SELECT\" :store NIL).   Call 
+   next-result-set to position on the first result set then use next-row
+   to fetch all the individual rows.   
+
+   Use dont-release if you don't want cl-mysql to release all the resources
+   when the last result set has been processed.   This might be useful, for
+   instance, if you need access to the fields through result-set-fields after
+   the result set has been processed.
+
+   You can, if you wish elect to not process each individual row of a result
+   set by setting :store T.   However, you cannot then use next-row because
+   you must process the entire result set in one go.
+ 
+   CL-USER> (query \"SELECT ...\" :store nil)
+   CL-USER> (next-result-set *)
+   T
+   CL-USER> (next-row **)
+   ...
+"
   (let ((last-result (result-set self))
 	(affected-rows 0))
     ;; Firstly free any prior results
