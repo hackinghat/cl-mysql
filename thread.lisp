@@ -12,7 +12,7 @@
 
 (defmacro with-lock (lock &body body)
   #+sbcl `(sb-thread:with-recursive-lock (,lock) ,@body)
-  #-sbcl body)
+  #-sbcl `(progn ,@body))
 
 (defun pool-wait (pool)
   "We release the pool lock we're holding to wait on the queue lock.   Note that

@@ -168,9 +168,12 @@
 
 (defun error-if-null (database return-value)
   (if (null-pointer-p return-value)
+      (let ((db-handle (typecase database
+                         (integer database)
+                         (t (pointer database)))))
       (error 'mysql-error
-	     :message (mysql-error (pointer database))
-	     :errno (mysql-errno (pointer database))))
+	     :message (mysql-error db-handle)
+	     :errno (mysql-errno db-handle))))
   return-value)
 
 (defun error-if-null-with-fields (database return-value)

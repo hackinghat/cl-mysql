@@ -46,7 +46,8 @@
 (in-package "CL-MYSQL-SYSTEM")
 
 (define-foreign-library libmysqlclient
-  (t (:default "libmysqlclient_r")))
+  ((:not :windows) (:default "libmysqlclient_r"))
+  (:windows (:default "libmysql")))
 
 (use-foreign-library libmysqlclient)
 
@@ -97,7 +98,6 @@
 
 ;;; Error codes
 ;;;
-(defconstant +commands-out-of-sync+ 2014)
 (defconstant +error-first+ 2000)
 (defconstant +unknown-error+ 2000)
 (defconstant +socket-create-error+ 2001)
@@ -225,7 +225,7 @@
   (unix-socket :string)
   (client-flag :unsigned-long))
 
-(defmysqlfun ("mysql_affected_rows" mysql-affected-rows) :unsigned-long-long
+(defmysqlfun ("mysql_affected_rows" mysql-affected-rows) :unsigned-long
   (mysql :pointer))
 
 (defmysqlfun ("mysql_character_set_name" mysql-character-set-name) :string
@@ -275,7 +275,7 @@
 (defmysqlfun ("mysql_use_result" mysql-use-result) :pointer
   (mysql :pointer))
 
-(defmysqlfun ("mysql_num_rows" mysql-num-rows) :unsigned-long-long
+(defmysqlfun ("mysql_num_rows" mysql-num-rows) :unsigned-long
   (mysql-res :pointer))
 
 (defmysqlfun ("mysql_list_dbs" mysql-list-dbs) :pointer
@@ -320,6 +320,7 @@
 (defcenum enum-field-types
   :decimal :tiny :short :long :float :double :null :timestamp :longlong
   :int24 :date :time :datetime :year :newdate :varchar :bit
+  (:unknown 63)
   (:newdecimal 246)
   (:enum 247)
   (:set 248)
