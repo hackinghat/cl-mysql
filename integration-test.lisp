@@ -1,14 +1,14 @@
 (in-package cl-mysql-test)
 
 (defparameter *z* 1)
-(defparameter *z-mutex* (sb-thread:make-mutex))
+(defparameter *z-mutex* (cl-mysql-system:make-lock nil))
 
 (defun reset-z ()
-  (sb-thread:with-mutex (*z-mutex*)
+  (cl-mysql-system:with-lock *z-mutex*
     (setf *z* 0)))
 
 (defun z ()
-  (sb-thread:with-mutex (*z-mutex*)
+  (cl-mysql-system:with-lock *z-mutex*
     (incf *z*)))
 
 (defun setup-test-database (min max)
@@ -24,16 +24,17 @@
 (defun long-test (n)
   "Loop from 1 to"
   (setup-test-database 1 2)
-  (mapcar #'sb-thread:join-thread
-	  (loop for i from 1 to n
-	     collect (progn
-		       (sleep  0.01)
-		       (princ ".")
-		       (generic-start-thread-in-nsecs 
-			(lambda ()
-			  (query
-			   (format nil  "USE cl_mysql_test; INSERT INTO X (X)  VALUES (~D)" (z))
-			   :database *conn*)) (random 5)))))
+  (cl-mysql-system:wait-on-threads
+   (loop for i from 1 to n
+       collect (progn
+                 (sleep  0.01)
+                 (princ ".")
+                 (generic-start-thread-in-nsecs
+                  (lambda (db)
+                    (query
+                     (format nil  "USE cl_mysql_test; INSERT INTO X (X)  VALUES (~D)" (z))
+                     :database db)) (random 5)  *conn*))))
   (unless (equalp (/ (+ n 1) 2)
 		  (first (nth-row (query "SELECT AVG(X) FROM X" :database *conn*) 0)))
-    (error "Long test didn't have correct result!")))
+    (error "Long test didn't have correct result!"))
+  t)

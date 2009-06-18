@@ -16,13 +16,15 @@
    #:available-connections #:result-set #:max-connections #:min-connections
    #:result-set-fields #:process-result-set
    ;; Special vairalbes
-   #:*type-map* #:*last-connection*
+   #:*type-map* #:*last-database*
    ;; Public functions
    #:connect #:query #:use #:disconnect #:ping #:option
    #:client-version #:server-version
    #:list-dbs #:list-tables #:list-processes #:list-fields
    #:escape-string
    #:next-result-set #:next-row #:nth-row #:with-rows
+   ;; Thread functions
+   #:wait-on-threads #:make-lock #:with-lock
    ;; Constants
    #:+client-compress+  #:+client-found-rows+    #:+client-ignore-sigpipe+
    #:+client-ignore-space+  #:+client-interactive+ #:+client-local-files+
@@ -310,6 +312,9 @@
   (mysql :pointer))
 
 (defmysqlfun ("mysql_fetch_fields" mysql-fetch-fields) :pointer
+  (mysql-res :pointer))
+
+(defmysqlfun ("mysql_fetch_field" mysql-fetch-field) :pointer
   (mysql-res :pointer))
 
 (defmysqlfun ("mysql_options" mysql-options) :int

@@ -54,7 +54,7 @@
 	       (fields (mysql-fetch-fields mysql-res))
 	       (extracted-fields
 		(loop for i from 0 to num-fields
-		   collect (let ((mref (mem-aref fields 'mysql-field i)))
+		   collect (let ((mref (mysql-fetch-field mysql-res)))
 			     (list
 			      (foreign-slot-value mref 'mysql-field 'name)
 			      (foreign-enum-keyword

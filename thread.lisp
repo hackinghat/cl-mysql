@@ -4,15 +4,27 @@
 ;;;;
 (in-package "CL-MYSQL-SYSTEM")
 
+(eval-when (:load-toplevel)
+  #+allegro (mp:start-scheduler))
+
 (defun make-lock (name)
-  #+sbcl (sb-thread:make-mutex :name name))
+  #+sb-thread (sb-thread:make-mutex :name name)
+  #+allegro (mp:make-process-lock :name name))
 
 (defun make-wait-resource ()
-  #+sbcl (sb-thread:make-waitqueue))
+  #+sb-thread (sb-thread:make-waitqueue))
+
+(defun wait-on-threads (threads)
+  #+sb-thread (mapcar #'sb-thread:join-thread threads)
+  #+allegro (mapcar (lambda (p)
+                      (mp:process-wait "Joining ..." (lambda ()
+                                                       (not (mp:process-alive-p p))))) threads)
+ )
 
 (defmacro with-lock (lock &body body)
-  #+sbcl `(sb-thread:with-recursive-lock (,lock) ,@body)
-  #-sbcl `(progn ,@body))
+  #+sb-thread `(sb-thread:with-recursive-lock (,lock) ,@body)
+  #+allegro `(mp:with-process-lock (,lock) ,@body)
+  #-(or sb-thread allegro) `(progn ,@body))
 
 (defun pool-wait (pool)
   "We release the pool lock we're holding to wait on the queue lock.   Note that
@@ -32,7 +44,8 @@
 			     (t
 			      (sb-thread:release-mutex (pool-lock pool))
 			      (sb-thread:condition-wait (wait-queue pool)
-							(wait-queue-lock pool)))))))))
+                                   (wait-queue-lock pool))))))))
+  #+allegro (mp:process-wait "Waiting for pool" #'can-aquire pool))
 
 (defun pool-notify (pool)
   #+sbcl (sb-thread:with-mutex ((wait-queue-lock pool))

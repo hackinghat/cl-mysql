@@ -4,11 +4,16 @@
 ;;;;
 (defpackage com.hackinghat.cl-mysql-test
   (:nicknames "CL-MYSQL-TEST")
-  (:use :cl :stefil :cl-mysql-system))
+  (:use :cl :stefil :cl-mysql-system)
+  (:export *host* *user* *password*))
 
 (in-package "CL-MYSQL-TEST")
 
 (in-root-suite)
+
+(defparameter *host* "localhost")
+(defparameter *user* nil)
+(defparameter *password* nil)
 
 (defsuite* test)
 
@@ -29,7 +34,7 @@
   (is (eql 2.356d0 (string-to-float "2.356" 1)))
   (is (eql 12345678d0 (string-to-float "12345678" 1)))
   (is (eql 1.23456789012345678d308 (string-to-float "1.23456789012345678e+308" 1)))
-  (is (eql 1.23456789012345678d-308 (string-to-float "1.23456789012345678e-308" 1))))
+  (is (eql 1.234567890123457d-308 (string-to-float "1.23456789012345678e-308" 1))))
 
 (deftest test-string-to-date ()
   (is (eq nil (string-to-date nil)))
@@ -83,13 +88,14 @@
 
 (deftest test-cffi-utf8-length ()
   (cffi:with-foreign-string (s "€")
-    (is (eql 3 (cffi-utf8-length s)))))
+    #-windows(is (eql 3 (cffi-utf8-length s)))
+    #+windows(is (eql 7 (cffi-utf8-length s)))))
 
 
 (defsuite* test-with-connection)
 
 (deftest test-setup ()
-  (connect)
+  (connect :host *host* :user *user* :password *password*)
   (query "DROP DATABASE IF EXISTS cl_mysql_test; CREATE DATABASE cl_mysql_test; 
                   GRANT ALL ON cl_mysql_test.* TO USER(); FLUSH PRIVILEGES;")
   (use "cl_mysql_test")
@@ -118,7 +124,7 @@
                 -- String types
                 ch CHAR(10),
                 vc VARCHAR(15),
-                bn BINARY(3),
+                bn BINARY(7),
                 vb VARBINARY(10),
                 bb BLOB,
                 tb TINYBLOB,
@@ -162,7 +168,7 @@
     (is (>= (nth 16 result) 3447985347))
     (is (string= "TEST1" (nth 17 result)))
     (is (string= "TEST2" (nth 18 result)))
-    (is (string= "TES" (nth 19 result)))
+    (is (string= "TEST3" (nth 19 result)))
     (is (string= "TEST4" (nth 20 result)))
     (is (equalp #(84 69 83 84 53) (nth 21 result)))
     (is (equalp #(84 69 83 84 54) (nth 22 result)))
@@ -180,7 +186,7 @@
   (disconnect))
  
 (deftest test-escape-string ()
-  (connect)
+  (connect :host *host* :user *user* :password *password*)
   (is (eq nil (escape-string nil)))
   (is (string= "" (escape-string "")))
   (is (string= "\\\"" (escape-string "\"")))
@@ -197,7 +203,7 @@
 (deftest test-use-result-1 ()
   "Test out the self-service result set stuff.  It works but it's a bit tricky to build
    a working result set/row processing loop ..."
-  (connect)
+  (connect :host *host* :user *user* :password *password*)
   (query "DROP DATABASE IF EXISTS cl_mysql_test; CREATE DATABASE cl_mysql_test; 
                   GRANT ALL ON cl_mysql_test.* TO USER(); FLUSH PRIVILEGES;")
   (use "cl_mysql_test")
@@ -227,7 +233,8 @@
 
 (deftest test-use-result-2 ()
   "We should be able to use two result sets simultaneously."
-  (connect :min-connections 2 :max-connections 2)
+  (connect :host *host* :user *user* :password *password*
+           :min-connections 2 :max-connections 2)
   (query "DROP DATABASE IF EXISTS cl_mysql_test; CREATE DATABASE cl_mysql_test; 
                   GRANT ALL ON cl_mysql_test.* TO USER(); FLUSH PRIVILEGES;")
   (use "cl_mysql_test")

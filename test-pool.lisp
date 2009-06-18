@@ -4,8 +4,7 @@
 ;;;;
 (in-package "CL-MYSQL-TEST")
 
-(defvar *conn* (connect :min-connections 1 :max-connections 1))
-
+(defvar *conn* nil)
 
 (defsuite* test-pool)
 
@@ -51,7 +50,8 @@
 (deftest test-count-connections-directly ()
   "There will, from time-to-time be NILs in the arrays so we better make sure
    that we can handle them and they don't interfere with the count"
-  (let ((pool (connect :min-connections 1 :max-connections 1)))
+  (let ((pool (connect :host *host* :user *user* :password *password*
+                       :min-connections 1 :max-connections 1)))
     (setf (available-connections pool)
 	  (make-array 3 :fill-pointer t :initial-contents (list NIL (aref (available-connections pool) 0) NIL)))
     (setf (connections pool)
@@ -64,7 +64,8 @@
     (is (eql 1 (count-connections pool)))))
 
 (deftest test-count-connections ()
-  (let ((pool (connect :min-connections 1 :max-connections 1)))
+  (let ((pool (connect :host *host* :user *user* :password *password*
+                       :min-connections 1 :max-connections 1)))
     (multiple-value-bind (total available) (count-connections pool)
       (is (eql 1 total))
       (is (eql 1 available)))
@@ -78,7 +79,8 @@
 	(is (eql 1 available))))))
 
 (deftest test-pool-expand-contract ()
-  (let ((pool (connect :min-connections 1 :max-connections 3)))
+  (let ((pool (connect :host *host* :user *user* :password *password*
+                       :min-connections 1 :max-connections 3)))
     (multiple-value-bind (total available) (count-connections pool)
       (is (eql 1 total))
       (is (eql 1 available)))
@@ -106,14 +108,16 @@
 	(is (eql 1 available))))))
 
 (deftest test-can-aquire ()
-  (let* ((pool (connect :min-connections 1 :max-connections 1))
+  (let* ((pool (connect :host *host* :user *user* :password *password*
+                        :min-connections 1 :max-connections 1))
 	 (conn (query "USE mysql" :store nil)))
     (is (not (can-aquire pool)))
     (release conn)
     (is (can-aquire pool))))
 
 (deftest test-contains ()
-  (let* ((pool (connect :min-connections 1 :max-connections 1))
+  (let* ((pool (connect :host *host* :user *user* :password *password*
+                        :min-connections 1 :max-connections 1))
 	 (conn (aquire pool nil)))
     (is (not (contains pool (available-connections pool) conn)))
     (is (contains pool (connections pool) conn))
@@ -122,19 +126,24 @@
     (is (contains pool (connections pool) conn))))
 
 
-(defun generic-start-thread-in-nsecs (fn n)
-  #+sbcl (sb-thread:make-thread (lambda ()
-				  (sleep n)
-				  (funcall fn))))
+(defun generic-start-thread-in-nsecs (fn n &optional (db cl-mysql-system:*last-database*))
+  #+sb-thread (sb-thread:make-thread (lambda ()
+                                       (sleep n)
+                                       (funcall fn db)))
+  #+allegro (mp:process-run-function nil (lambda (idb)
+                                           (sleep n)
+                                           (funcall fn idb)) db))
+
 (deftest test-thread-1 ()
   "Testing threading is always a bit suspect but we can test a little bit of it to
    make sure we have the general idea correct."
-  (let ((pool (connect :min-connections 1 :max-connections 1))
+  (let ((pool (connect :host *host* :user *user* :password *password*
+                       :min-connections 1 :max-connections 1))
 	(conn (query "SELECT 1" :store nil)))
     ;; Now we have a pool of 1 connection that is allocated, so start a thread
     ;; that will in 2 seconds increas the pool size to 2.
-    (generic-start-thread-in-nsecs (lambda ()
-				     (setf (max-connections pool) 2)) 1)
+    (generic-start-thread-in-nsecs (lambda (db)
+				     (setf (max-connections db) 2)) 1 pool)
     ;; This line will block until the thread above changes the max pool size
     (list-processes :database pool)
     (release conn)
@@ -145,22 +154,26 @@
       (is (eql 1 total))
       (is (eql 1 available)))))
 
+(defparameter *external-result* nil)
+
 (deftest test-thread-2 ()
   "This is the reverse of test-thread-1 in as much as we have a long running 
    query and our main thread waits until the long running query is completed.
    We use a closure to set a flag to indicate success."
-  (let ((pool (connect :min-connections 1 :max-connections 1))
-	(result nil))
+  (let ((pool (connect :host *host* :user *user* :password *password*
+                       :min-connections 1 :max-connections 1))
+        (result nil))
     ;; Now we have a pool of 1 connection that is allocated, so start a thread
     ;; that will in 2 seconds increas the pool size to 2.
-    (generic-start-thread-in-nsecs (lambda ()
-				     (let ((conn (query "SELECT 1" :store nil)))
-				       (sleep 1)
-				       (release conn)
-				       (setf result 1))) 0)
+    (generic-start-thread-in-nsecs (lambda (db)
+                                     (let ((conn (query "SELECT 1" :store nil :database db)))
+                                       (sleep 1)
+                                       (setf *external-result* 1)
+                                       (release conn)
+                                       )) 0 pool)
     ;; This line will block until the thread above completes
-    (list-processes)
-    (is (eql 1 result))
+    (list-processes :database pool)
+    (is (eql 1 *external-result*))
     ;; Because we increased the max connection count we should have closed
     ;; the extra connection we opened so we should be back to the initial state.
     (multiple-value-bind (total available)
@@ -173,13 +186,18 @@
    that will insert the numbers  from 1 to 100 into a table.   Join the threads
    and then run a query  to verify that all was well.   This should demonstrate
    whether we have a problem with locking or not."
+  (setf *conn* (or *conn* (connect :host *host* :user *user* :password *password*
+                        :min-connections 1 :max-connections 1)))
   (query "DROP DATABASE IF EXISTS cl_mysql_test; CREATE DATABASE cl_mysql_test; 
                   GRANT ALL ON cl_mysql_test.* TO USER(); FLUSH PRIVILEGES;" :database *conn*)
   (use "cl_mysql_test" :database *conn*)
   (query "CREATE TABLE X ( X INT )" :database *conn*)
-  (let ((threads (loop for i from 1 to 100
-		    collect (generic-start-thread-in-nsecs
-			     (lambda ()
-			       (query (format nil "USE cl_mysql_test; INSERT INTO X VALUES (~D)" i) :database *conn*)) (1+ (random 2))))))
-    (mapcar #'sb-thread:join-thread threads)
-    (is (eql 100 (caaaar (query "SELECT COUNT(*) FROM X" :database *conn*))))))
+  (let ((threads (loop for i from 1 to 50
+                     collect (generic-start-thread-in-nsecs
+                              (lambda (db)
+                                (query
+                                 (format nil "USE cl_mysql_test; INSERT INTO X VALUES (~D)" i)
+                                 :database db))
+                              (1+ (random 2)) *conn*))))
+    (cl-mysql-system:wait-on-threads threads)
+    (is (eql 50 (caaaar (query "SELECT COUNT(*) FROM X" :database *conn*))))))
