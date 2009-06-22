@@ -11,6 +11,10 @@
   (cl-mysql-system:with-lock *z-mutex*
     (incf *z*)))
 
+(defun getz ()
+  (cl-mysql-system:with-lock *z-mutex*
+    *z*))
+
 (defun setup-test-database (min max)
   (reset-z)
   (setf (min-connections *conn*) min)
@@ -23,18 +27,30 @@
 
 (defun long-test (n)
   "Loop from 1 to"
-  (setup-test-database 1 2)
-  (cl-mysql-system:wait-on-threads
-   (loop for i from 1 to n
-       collect (progn
-                 (sleep  0.01)
-                 (princ ".")
-                 (generic-start-thread-in-nsecs
-                  (lambda (db)
-                    (query
-                     (format nil  "USE cl_mysql_test; INSERT INTO X (X)  VALUES (~D)" (z))
-                     :database db)) (random 5)  *conn*))))
-  (unless (equalp (/ (+ n 1) 2)
-		  (first (nth-row (query "SELECT AVG(X) FROM X" :database *conn*) 0)))
-    (error "Long test didn't have correct result!"))
+  (let ((last-t (get-universal-time)))
+    (setup-test-database 1 2)
+    (cl-mysql-system:wait-on-threads
+     (loop for i from 1 to n
+         collect (progn
+                   ;(sleep  0.02)
+                   (if (= 0 (mod (1+ (getz)) 1000))
+                       (progn
+                         (format t "Processed 1000 entries in: ~Ds" (-
+                                                                     (get-universal-time)
+                                                                     last-t))
+                         (setf last-t (get-universal-time)))
+                     (princ "."))
+                   (if (= 0 (mod (getz) 80))
+                       (format t "~%"))
+                   
+                   (start-thread-in-nsecs
+                    (lambda ()
+                      (query
+                       (format nil  "USE cl_mysql_test; INSERT INTO X (X)  VALUES (~D)" (z))
+                       :database *conn*)) 0 ;(random 1)
+                    )))))
+  (let ((result
+	 (first (nth-row (query "SELECT AVG(X) FROM X" :database *conn*) 0))))
+    (format t "~%Database average result = ~D ~[OK~;FAIL~]" result
+	    (if (equalp (/ (+ n 1) 2) result) 0 1)))
   t)

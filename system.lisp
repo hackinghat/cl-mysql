@@ -14,7 +14,7 @@
    #:connected #:available #:in-use #:pointer #:connection-equal
    #:aquire #:can-aquire #:release #:count-connections #:contains #:connections
    #:available-connections #:result-set #:max-connections #:min-connections
-   #:result-set-fields #:process-result-set
+   #:result-set-fields #:process-result-set #:pool-lock
    ;; Special vairalbes
    #:*type-map* #:*last-database*
    ;; Public functions
@@ -24,7 +24,7 @@
    #:escape-string
    #:next-result-set #:next-row #:nth-row #:with-rows
    ;; Thread functions
-   #:wait-on-threads #:make-lock #:with-lock
+   #:wait-on-threads #:make-lock #:with-lock #:start-thread-in-nsecs
    ;; Constants
    #:+client-compress+  #:+client-found-rows+    #:+client-ignore-sigpipe+
    #:+client-ignore-space+  #:+client-interactive+ #:+client-local-files+

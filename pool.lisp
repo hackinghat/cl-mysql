@@ -106,6 +106,10 @@
       (count-connections self)
     (or (> available 0) (< total (max-connections self)))))
 
+(defmethod can-aquire-lock ((self connection-pool))
+  (with-lock (pool-lock self)
+    (can-aquire self)))
+
 (defmethod connect-upto-minimum ((self connection-pool) n min)
   "We use this method to allocate up to the minimum number of connections.
    It is called once after initialize-instance and will be called again every 
@@ -130,28 +134,35 @@
 (defmethod take-first ((self connection-pool))
   "Take the first available connection from the pool.   If there are none, 
    NIL is returned."
-  ;; Pool wait will not return until a connection can be aquired.
-  (pool-wait self)
-  ;; After this call we should have enough available connections to take one
-  (multiple-value-bind (total available) (count-connections self)
-    (connect-upto-minimum self total
-			  (if (> available 0)
-			      (min-connections self)
-			      (min 
-			       (max-connections self)
-			       (1+ total)))))
-  (let ((first (loop for conn across (connections self)
-		  if (and conn (available conn))
-		  return conn)))
-    (toggle first)
-    (remove-connection-from-array self (available-connections self) first)
-    (clean-connections self (available-connections self))
-    (values first)))
+  (with-lock (pool-lock self)
+    ;; If we can't aquire a connection return nil 
+    (if (not (can-aquire self))
+        (return-from take-first nil))
+    
+    ;; We can aquire but it might be because the max-number of connections
+    ;; has changed so connect up to the minimum required to service this
+    ;; request.
+    (multiple-value-bind (total available) (count-connections self)
+      (connect-upto-minimum self total
+                            (if (> available 0)
+                                (min-connections self)
+                              (min 
+                               (max-connections self)
+                               (1+ total)))))
+    ;; There now must be a connection available in the pool, so find the
+    ;; first one and lock it.
+    (let ((first (loop for conn across (connections self)
+                     if (and conn (available conn))
+                     return conn)))
+      (toggle first)
+      (remove-connection-from-array self (available-connections self) first)
+      (clean-connections self (available-connections self))
+      (values first))))
 
 (defmethod aquire ((self t) (block t))
   (error 'cl-mysql-error :message "There is no available pool to aquire from!"))
 
-(defmethod aquire ((self connection-pool) block)
+(defmethod aquire ((self connection-pool) (block t))
   "Aquire from the pool a single connection object that can be passed to higher 
    level API functions like QUERY.   
 
@@ -159,14 +170,18 @@
    is T, and available connections is 0  and there are already max-connections.   
    On implementations that do not support threading this method will always 
    return NIL."
-  ;; First we need to make sure that we aren't under-allocated.   This can happen if a previous
-  ;; pool was disconnected or if the number of min connections has changed
-  ;; Mutex
-  (with-lock (pool-lock self)
-    (let ((candidate (take-first self)))
-      (when (not  candidate)
-	(error 'cl-mysql-error :message "Can't allocate any more connections!"))
-      (values candidate))))
+  (let ((candidate (take-first self)))
+    (if (not  candidate)
+        (if block
+            (loop until candidate
+                  do (progn
+                    ;; The exact behaviour of pool-wait is implementation
+                    ;; dependent.   Some implementations will sleep some
+                    ;; will wait on a condition variable.
+                    (pool-wait self)
+                    (setf candidate (take-first self))))
+            (error 'cl-mysql-error :message "Can't allocate any more connections!")))
+    (values candidate)))
 
 (defmethod aquire ((self connection) block)
   (declare (ignore block))

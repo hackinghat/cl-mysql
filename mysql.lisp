@@ -191,7 +191,7 @@
 ;;;
 (defmacro with-connection ((var &optional database (release t)) &body body)
   (let ((retval (gensym)))
-    `(let* ((,var (aquire (or ,database *last-database*) nil))
+    `(let* ((,var (aquire (or ,database *last-database*) t))
 	    (,retval ()))
        (unwind-protect (setq ,retval (progn ,@body))
 	 (when ,release

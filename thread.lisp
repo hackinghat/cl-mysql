@@ -11,6 +11,14 @@
   #+sb-thread (sb-thread:make-mutex :name name)
   #+allegro (mp:make-process-lock :name name))
 
+(defun release-lock (lock)
+  #+sb-thread (sb-thread:release-mutex lock)
+  #+allegro (mp:process-unlock lock))
+
+(defun get-lock (lock)
+  #+sb-thread (sb-thread:get-mutex lock)
+  #+allegro (mp:process-lock lock))
+
 (defun make-wait-resource ()
   #+sb-thread (sb-thread:make-waitqueue))
 
@@ -18,36 +26,31 @@
   #+sb-thread (mapcar #'sb-thread:join-thread threads)
   #+allegro (mapcar (lambda (p)
                       (mp:process-wait "Joining ..." (lambda ()
-                                                       (not (mp:process-alive-p p))))) threads)
- )
+                                                       (not (mp:process-alive-p p))))) threads))
 
 (defmacro with-lock (lock &body body)
   #+sb-thread `(sb-thread:with-recursive-lock (,lock) ,@body)
   #+allegro `(mp:with-process-lock (,lock) ,@body)
   #-(or sb-thread allegro) `(progn ,@body))
 
+(defun start-thread-in-nsecs (fn n)
+  #+sb-thread (sb-thread:make-thread (lambda ()
+                                       (sleep n)
+                                       (funcall fn)))
+  #+allegro (mp:process-run-function nil (lambda ()
+                                           (sleep n)
+                                           (funcall fn))))
+    
 (defun pool-wait (pool)
-  "We release the pool lock we're holding to wait on the queue lock.   Note that
-   we MUST gain the pool lock back before we can continue because dependent code
-   is expecting us.   This method is a little fiddly because we need to make sure
-   that we have the pool lock before we call can-aquire, but also we should not
-   release the lock unless we can't aquire.  We also throw in an unwind-protect
-   to try and make sure that whatever happens we reenter the pool code with the
-   lock held. "
-  #+sbcl (progn
-	   (sb-thread:release-mutex (pool-lock pool))
-	   (sb-thread:with-mutex ((wait-queue-lock pool))
-	     (loop until (progn
-			   (sb-thread:get-mutex (pool-lock pool))
-			   (cond
-			     ((can-aquire pool) t)
-			     (t
-			      (sb-thread:release-mutex (pool-lock pool))
-			      (sb-thread:condition-wait (wait-queue pool)
-                                   (wait-queue-lock pool))))))))
-  #+allegro (mp:process-wait "Waiting for pool" #'can-aquire pool))
+  ;; With SBCL threads we can use condition variables to wake us up 
+  #+sb-thread (sb-thread:with-mutex ((wait-queue-lock pool))
+                                    (sb-thread:condition-wait (wait-queue pool) 
+                                                              (wait-queue-lock pool)))
+  ;; With Allegro CL we will use the process-wait to run a monitor thread
+  ;; on the condition
+  #+allegro (mp:process-wait "Waiting for pool" #'can-aquire-lock pool))
 
 (defun pool-notify (pool)
-  #+sbcl (sb-thread:with-mutex ((wait-queue-lock pool))
-	    (sb-thread:condition-notify (wait-queue pool))))
+  #+sb-thread (sb-thread:with-mutex ((wait-queue-lock pool))
+                                    (sb-thread:condition-notify (wait-queue pool))))
 
