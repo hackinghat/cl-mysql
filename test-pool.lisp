@@ -127,6 +127,7 @@
 
 
 
+#+thread-support
 (deftest test-thread-1 ()
   "Testing threading is always a bit suspect but we can test a little bit of it to
    make sure we have the general idea correct."
@@ -147,6 +148,7 @@
       (is (eql 1 total))
       (is (eql 1 available)))))
 
+#+thread-support
 (deftest test-thread-2 ()
   "This is the reverse of test-thread-1 in as much as we have a long running 
    query and our main thread waits until the long running query is completed.
@@ -172,6 +174,7 @@
       (is (eql 1 total))
       (is (eql 1 available)))))
 
+#+thread-support
 (deftest test-thread-3 ()
   "The killer thread test.   Start 100 threads to run in the next 1-3 seconds
    that will insert the numbers  from 1 to 100 into a table.   Join the threads
