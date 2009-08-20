@@ -173,7 +173,7 @@
 			 ; Not quite sure if this is right
 			 ; but it seems to work - RG
 			 (connection (pointer database))
-                         (t (pointer database)))))
+                         (t database))))
       (error 'mysql-error
 	     :message (mysql-error db-handle)
 	     :errno (mysql-errno db-handle))))
