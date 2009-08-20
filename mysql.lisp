@@ -170,6 +170,9 @@
   (if (null-pointer-p return-value)
       (let ((db-handle (typecase database
                          (integer database)
+			 ; Not quite sure if this is right
+			 ; but it seems to work - RG
+			 (connection (pointer database))
                          (t (pointer database)))))
       (error 'mysql-error
 	     :message (mysql-error db-handle)
