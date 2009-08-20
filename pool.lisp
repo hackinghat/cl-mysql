@@ -11,17 +11,17 @@
 (defparameter *debug* t)
 
 (defclass connection-pool (connectable)
-  ((hostname :type string :reader hostname :initarg :hostname :initform nil)
-   (username :type string :reader username :initarg :username :initform nil)
-   (password :type string :reader password :initarg :password :initform nil)
-   (database :type string :reader database :initarg :database :initform nil)
-   (port :type integer :reader port :initarg :port :initform 0)
-   (socket :type string :reader socket :initarg :socket :initform nil)
-   (flags :type integer :reader flags :initarg :flags :initform 0)
-   (min-connections :type integer :reader min-connections :initarg :min-connections :initform 1)
-   (max-connections :type integer :reader max-connections :initarg :max-connections :initform 1)
-   (available-connections :type array :accessor available-connections :initform nil)
-   (connections :type array :accessor connections :initform nil)
+  ((hostname :reader hostname :initarg :hostname :initform nil)
+   (username :reader username :initarg :username :initform nil)
+   (password :reader password :initarg :password :initform nil)
+   (database :reader database :initarg :database :initform nil)
+   (port :reader port :initarg :port :initform 0)
+   (socket :reader socket :initarg :socket :initform nil)
+   (flags :reader flags :initarg :flags :initform 0)
+   (min-connections :reader min-connections :initarg :min-connections :initform 1)
+   (max-connections :reader max-connections :initarg :max-connections :initform 1)
+   (available-connections :type (or array null) :accessor available-connections :initform nil)
+   (connections :type (or array null) :accessor connections :initform nil)
    ;; We need two locks per pool, one to keep the internal state of the pool
    ;; safe and another to allow us to block other threads from trying to aquire more
    ;; connections than the pool contains ...

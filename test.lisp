@@ -161,8 +161,10 @@
     (is (eql (/ 111111111111111111 1000000000000000000) (tenth result)))
     (is (eql (/ 1 10) (nth 10 result)))
     (is (eql 12345678901234567890123456789012345678901234567890123456789012345 (nth 11 result)))
-    (is (eql 3471199200 (nth 12 result)))
-    (is (eql 3471199200 (nth 13 result)))
+    ;; note that these values are time zone specific, so we only test that their
+    ;; accurate to +- 1/2 day
+    (is (< (abs (- 3471192000 (nth 12 result))) 43200))
+    (is (< (abs (- 3471192000 (nth 13 result))) 43200))
     (is (eql 0 (nth 14 result)))
     (is (eql 2009 (nth 15 result)))
     (is (>= (nth 16 result) 3447985347))

@@ -328,7 +328,7 @@
   (declare (optimize (speed 3) (safety 3))
 	   (type (integer 0 65536) num-fields))
   (let* ((mysql-lens (mysql-fetch-lengths mysql-res))
-         (int-size (foreign-type-size :int)))
+         (int-size (foreign-type-size :long)))
     (declare (type (integer 0 16) int-size))
     (loop for i of-type fixnum from 0 to (* num-fields int-size) by int-size
        for f of-type list in field-names-and-types
