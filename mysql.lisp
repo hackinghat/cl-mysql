@@ -399,14 +399,14 @@
   "Check whether a connection is established or not.  If :opt-reconnect is 
    set and there is no connection then MySQL's C API attempts a reconnection."
   (with-connection (conn database)
-    (error-if-non-zero conn (mysql-ping conn))
+    (error-if-non-zero conn (mysql-ping (pointer conn)))
     (values t)))
 
 (defun %set-string-option (option value &key database)
   (let ((retval 0))
     (with-connection (conn database)
       (with-foreign-pointer-as-string (str 255)
-	(setf retval (mysql-options conn
+	(setf retval (mysql-options (pointer conn)
 				    (foreign-enum-value 'enum-options option)
 				    (lisp-string-to-foreign value str 255)))))
     (values retval)))
@@ -416,7 +416,7 @@
     (with-connection (conn database)
       (with-foreign-object (int-value :int)
 	(setf (mem-ref int-value :int) value)
-	(setf retval (mysql-options conn
+	(setf retval (mysql-options (pointer conn)
 				    (foreign-enum-value 'enum-options option)
 				    int-value))))
     (values retval)))
