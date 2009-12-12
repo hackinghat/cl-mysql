@@ -25,7 +25,7 @@
 
 (asdf:defsystem #:cl-mysql
   :description "Common Lisp MySQL library bindings"
-  :version "0.1"
+  :version "0.2"
   :author "Steve Knight <stkni@yahoo.com>"
   :maintainer "Steve Knight <stkni@yahoo.com>"
   :licence "MIT"
