@@ -144,7 +144,7 @@
   (mapcar (lambda (map)
 	    (setf (gethash (first map) *type-map*) (second map)))
 	  '((:DECIMAL  string-to-ratio)
-	    (:TINY  string-to-intger)
+	    (:TINY  string-to-integer)
 	    (:SHORT  string-to-integer)
 	    (:LONG  string-to-integer)
 	    (:FLOAT  string-to-float)
