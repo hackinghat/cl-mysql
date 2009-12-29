@@ -25,7 +25,7 @@
 
 (asdf:defsystem #:cl-mysql
   :description "Common Lisp MySQL library bindings"
-  :version "0.2"
+  :version "0.1"
   :author "Steve Knight <stkni@yahoo.com>"
   :maintainer "Steve Knight <stkni@yahoo.com>"
   :licence "MIT"
@@ -40,7 +40,8 @@
 	       (:file "connection")
 	       (:file "pool")
 	       (:file "mysql")
-	       (:file "package"))
+	       (:file "package")
+	       (:file "prepare"))
   :depends-on (#:cffi))
 
 (defmethod operation-done-p 

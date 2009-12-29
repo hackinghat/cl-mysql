@@ -27,5 +27,6 @@
 	       #:stefil)
   :components ((:file "test")
                (:file "test-pool")
+	       (:file "test-prepare")
                (:file "integration-test"))
   :serial t)
