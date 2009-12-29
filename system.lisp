@@ -29,12 +29,13 @@
    ;; Conditions
    #:cl-mysql-error #:mysql-error
    ;; Classes
-   #:connection #:connection-pool
+   #:connection #:connection-pool #:statement
    ;; Methods
    #:connected #:available #:in-use #:pointer #:connection-equal
    #:aquire #:can-aquire #:release #:count-connections #:contains #:connections
    #:available-connections #:result-set #:max-connections #:min-connections
-   #:result-set-fields #:process-result-set #:pool-lock
+   #:result-set-fields #:process-result-set #:pool-lock #:bind-arg
+   #:configure-bindings #:bound-map #:next-index #:bind #:close
    ;; Special vairalbes
    #:*type-map* #:*last-database*
    ;; Public functions
@@ -342,6 +343,42 @@
   (option :int)
   (arg :pointer))
 
+;; NULL if error
+(defmysqlfun ("mysql_stmt_init" mysql-stmt-init) :pointer
+  (mysql :pointer))
+
+;; Non-zero if error
+(defmysqlfun ("mysql_stmt_prepare" mysql-stmt-prepare) :int
+  (stmt :pointer)
+  (stmt_str :string)
+  (length :unsigned-long))
+
+;; Non-zero if error
+(defmysqlfun ("mysql_stmt_bind_param" mysql-stmt-bind-param) :char
+  (stmt :pointer)
+  (bind :pointer))
+
+(defmysqlfun ("mysql_stmt_sqlstate" mysql-stmt-sqlstate) :string
+  (stmt :pointer))
+
+(defmysqlfun ("mysql_stmt_errno" mysql-stmt-errno) :int
+  (stmt :pointer))
+
+(defmysqlfun ("mysql_stmt_error" mysql-stmt-error) :string
+  (stmt :pointer))
+
+(defmysqlfun ("mysql_stmt_execute" mysql-stmt-execute) :int
+  (stmt :pointer))
+
+(defmysqlfun ("mysql_stmt_affected_rows" mysql-stmt-affected-rows) :unsigned-long
+  (stmt :pointer))
+
+(defmysqlfun ("mysql_stmt_param_count" mysql-stmt-param-count) :int
+  (stmt :pointer))
+
+(defmysqlfun ("mysql_stmt_close" mysql-stmt-close) :char
+  (stmt :pointer))
+
 (defcenum enum-field-types
   :decimal :tiny :short :long :float :double :null :timestamp :longlong
   :int24 :date :time :datetime :year :newdate :varchar :bit
@@ -399,4 +436,47 @@
   (dir :string)
   (mbminlen :unsigned-int)
   (mbmaxlen :unsigned-int))
+
+
+;; 5.1
+(defcstruct mysql-bind
+  (length :pointer)
+  (is-null :pointer)
+  (buffer :pointer)
+  (error :pointer)
+  (row-ptr :pointer)
+  (store-param-func :pointer)
+  (fetch-result-func :pointer)
+  (skip-result-func :pointer)
+  (buffer-length :unsigned-long)
+  (offset :unsigned-long)
+  (length-value :unsigned-long)
+  (param-number :unsigned-int)
+  (pack-length :unsigned-int)
+  (buffer-type :int)
+  (error-value :char)
+  (is-unsigned :char)
+  (long-data-used :char)
+  (is-null-value :char)
+  (extension :pointer))
+
+;; 5.0
+;(defcstruct mysql-bind
+;  (length :pointer)
+;  (is-null :char)
+;  (buffer :pointer)
+;  (error :pointer)
+;  (buffer-type :int)
+;  (buffer-length :unsigned-long)
+;  (row-ptr :pointer)
+;  (offset :unsigned-long)
+;  (param-number :unsigned-int)
+;  (pack-length :unsigned-int)
+;  (error-value :char)
+;  (is-unsigned :char)
+;  (long-data-used :char)
+;  (is-null-value :char)
+;  (store-param-func :pointer)
+;  (fetch-result-func :pointer)
+;  (skip-result-func :pointer))
 

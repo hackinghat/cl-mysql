@@ -144,7 +144,7 @@
   (mapcar (lambda (map)
 	    (setf (gethash (first map) *type-map*) (second map)))
 	  '((:DECIMAL  string-to-ratio)
-	    (:TINY  string-to-integer)
+	    (:TINY  string-to-intger)
 	    (:SHORT  string-to-integer)
 	    (:LONG  string-to-integer)
 	    (:FLOAT  string-to-float)
@@ -179,11 +179,15 @@
                      (cl-mysql-error-message condition)))))
 
 (defun error-if-non-zero (database return-value)
-  (if (not (eql 0 return-value))
-      (error 'mysql-error
-	     :message (mysql-error (pointer database))
-	     :errno (mysql-errno (pointer database))))
-  return-value)
+  (let ((error-function (etypecase database (statement #'mysql-stmt-error)
+				   (connection #'mysql-error)))
+	(errorno-function (etypecase database (statement #'mysql-stmt-errno)
+				     (connection #'mysql-errno))))
+    (if (not (eql 0 return-value))
+	(error 'mysql-error
+	       :message (funcall error-function (pointer database))
+	       :errno (funcall errorno-function (pointer database))))
+    return-value))
 
 (defun error-if-null (database return-value)
   (if (null-pointer-p return-value)
@@ -311,7 +315,7 @@
 
 (defun set-character-set (csname &key database)
   (with-connection (conn database)
-    (error-if-non-zero database (mysql-set-character-set (pointer conn) csname))))
+    (error-if-non-zero conn (mysql-set-character-set (pointer conn) csname))))
 
 ;;; Result set functions
 ;;;
@@ -417,7 +421,7 @@
 	   (setf (use-query-active conn) t)
 	   (values conn)))))
 
-(defun ping (&key database)t
+(defun ping (&key database)
   "Check whether a connection is established or not.  If :opt-reconnect is 
    set and there is no connection then MySQL's C API attempts a reconnection."
   (with-connection (conn database)
