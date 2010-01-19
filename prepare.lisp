@@ -24,6 +24,14 @@
 
 (in-package "CL-MYSQL-SYSTEM")
 
+(defparameter *default-sequence-length* 1024
+  "This is the maximum length that a sequence sent as a bound parameter can be
+   It's a bit lame really.   How it should really work is that 'bind' gives you
+   a binding and re-binds (if that's possible) when the buffer is too small. 
+
+   In practice, though, I doubt it matters very much.")
+
+
 (defclass statement ()
   ((pointer :reader pointer :initarg :pointer :initform (cffi:null-pointer))
    (database :reader database :initarg :database :initform nil)
@@ -97,7 +105,7 @@
   "Deallocates the memory that we attached to this binding."
   (when (bound-parameter-p self index)
     (let ((arg (bind-arg self index)))
-      (dolist (slot '(buffer is-null length))
+      (dolist (slot '(buffer is-null length error))
 	(foreign-free (foreign-slot-value arg 'mysql-bind slot))))))
   
 (defmethod close-statement ((self statement))
@@ -107,7 +115,11 @@
     (release-binding self i))
   (foreign-free (args self)))
 
-(defmethod bind ((self statement) sql-type &optional supplied-index)
+(defun repeat-char (s n)
+  (cond ((= n 0) nil)
+	(t (concatenate 'string s (repeat-char s (1- n))))))
+
+(defmethod bind ((self statement) sql-type &optional supplied-index (max-len *default-sequence-length*))
   "Set up the bind structure for later use"
   (let ((index (or supplied-index (next-index self))))
     (if (> index (1- (nargs self)))
@@ -118,22 +130,24 @@
     (release-binding self index)
     (let ((arg (bind-arg self index))
 	  (c-type (gethash sql-type *stmt-ctype-map*)))
-      (unless (eq :string c-type)
-	(setf (foreign-slot-value arg 'mysql-bind 'buffer) 
-	      (foreign-alloc c-type)))
+      (setf (foreign-slot-value arg 'mysql-bind 'buffer) 
+	    (cond ((eq :string c-type)
+		   (foreign-alloc :char :count max-len))
+		  (t (foreign-alloc c-type))))
 
       (setf 
        (foreign-slot-value arg 'mysql-bind 'buffer-type) 
        (foreign-enum-value 'enum-field-types sql-type)
+
        (foreign-slot-value arg 'mysql-bind 'length)
        (foreign-alloc :int)
-       ;; 5.0
-					;(foreign-slot-value b 'mysql-bind 'is-null) 0
-       ;; 5.1
+
        (foreign-slot-value arg 'mysql-bind 'is-null)
        (foreign-alloc :char)
+
        (foreign-slot-value arg 'mysql-bind 'error)
        (foreign-alloc :char)
+       
        ;; Mark this argument as bound
        (elt (bound-map self) index) t)
       ;; If all elements are now bound we assume we can dispatch
@@ -171,8 +185,11 @@
 		   (string (length type-adjusted-value))
 		   (t 0))))
     (if (eq :string buffer-c-type)
-	(setf (foreign-slot-value arg 'mysql-bind 'buffer) (foreign-string-alloc type-adjusted-value))
-	(setf (mem-ref (foreign-slot-value arg 'mysql-bind 'buffer) buffer-c-type) type-adjusted-value))
+	(lisp-string-to-foreign type-adjusted-value
+				(foreign-slot-value arg 'mysql-bind 'buffer)
+				*default-sequence-length*)
+	(setf (mem-ref (foreign-slot-value arg 'mysql-bind 'buffer)
+		       buffer-c-type) type-adjusted-value))
 
     (setf (mem-ref (foreign-slot-value arg 'mysql-bind 'is-null) :char) 
 	    is-null
