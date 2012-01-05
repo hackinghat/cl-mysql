@@ -480,8 +480,8 @@
 (defmacro with-rows ((var-row query-string
 			  &key
 			   (var-result (gensym))
-			   (database *last-database*)
-			   (type-map *type-map*))
+			   (database '*last-database*)
+			   (type-map '*type-map*))
 		     &body body)
   "Takes a query-string and iterates over the result sets assigning
    var-row to each individual row.  If you supply var-result it will
