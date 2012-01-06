@@ -109,7 +109,10 @@
     (let ((y (parse-integer string :start 0 :end 4))
 	  (m (parse-integer string :start 5 :end 7))
 	  (d (parse-integer string :start 8 :end 10)))
-      (encode-universal-time 0 0 0 d m y))))
+      (unless (or (zerop y)
+                  (zerop m)
+                  (zerop d))
+        (encode-universal-time 0 0 0 d m y)))))
 
 (defun string-to-seconds (string &optional len)
   "Fairly ugly function to turn MySQL TIME duration into an integer representation.
