@@ -109,7 +109,10 @@
     (let ((y (parse-integer string :start 0 :end 4))
 	  (m (parse-integer string :start 5 :end 7))
 	  (d (parse-integer string :start 8 :end 10)))
-      (encode-universal-time 0 0 0 d m y))))
+      (unless (or (zerop y)
+                  (zerop m)
+                  (zerop d))
+        (encode-universal-time 0 0 0 d m y 0)))))
 
 (defun string-to-seconds (string &optional len)
   "Fairly ugly function to turn MySQL TIME duration into an integer representation.
@@ -480,8 +483,8 @@
 (defmacro with-rows ((var-row query-string
 			  &key
 			   (var-result (gensym))
-			   (database *last-database*)
-			   (type-map *type-map*))
+			   (database '*last-database*)
+			   (type-map '*type-map*))
 		     &body body)
   "Takes a query-string and iterates over the result sets assigning
    var-row to each individual row.  If you supply var-result it will
