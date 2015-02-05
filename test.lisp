@@ -91,6 +91,7 @@
 (deftest test-string-to-universal-time ()
   (is (eq nil (string-to-universal-time nil)))
   (is (eq nil (string-to-universal-time "")))
+  (is (eq nil (string-to-universal-time "0000-00-00 00:00:00")))
   (is (eql 1
 	  (- (string-to-universal-time "2009-01-01 00:00:00")
 	     (string-to-universal-time "2008-12-31 23:59:59")))))

@@ -139,9 +139,12 @@
   (declare (optimize (speed 3) (safety 3))
            (type (or null simple-string) string)
            (type (or null fixnum) len))
-  (when (and string (> (or len (length string)) 0))
-    (+ (string-to-date (subseq string 0 10))
-       (string-to-seconds (subseq string 11)))))
+  (cond
+    ((equal "0000-00-00 00:00:00" string)
+     nil)
+    ((and string (> (or len (length string)) 0))
+     (+ (string-to-date (subseq string 0 10))
+        (string-to-seconds (subseq string 11))))))
 
 (eval-when (:load-toplevel)
   (mapcar (lambda (map)
