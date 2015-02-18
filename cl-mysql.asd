@@ -40,7 +40,7 @@
 	       (:file "connection")
 	       (:file "pool")
 	       (:file "mysql")
-	       (:file "prepare" :depends-on ("mysql"))
+	       (:file "prepare")
 	       (:file "package"))
   :depends-on (#:cffi))
 
