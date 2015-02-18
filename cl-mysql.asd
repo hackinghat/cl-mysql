@@ -39,8 +39,8 @@
 	       (:file "thread")
 	       (:file "connection")
 	       (:file "pool")
-	       (:file "prepare")
 	       (:file "mysql")
+	       (:file "prepare" :depends-on ("mysql"))
 	       (:file "package"))
   :depends-on (#:cffi))
 
