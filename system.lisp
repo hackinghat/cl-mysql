@@ -69,6 +69,7 @@
 (in-package "CL-MYSQL-SYSTEM")
 
 (define-foreign-library libmysqlclient
+  (:darwin (:or "libmysqlclient.20.dylib" "libmysqlclient.dylib"))
   ((:not :windows) (:default "libmysqlclient_r"))
   (:windows (:default "libmysql")))
 
