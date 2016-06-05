@@ -463,8 +463,7 @@
 
 (defun get-field (column-name field-names-and-types row)
   "Returns the correct element in the sequence from the row that matches the column-name"
-  (elt row (position column-name field-names-and-types :test (lambda (x)
-						      (string= (car x) column-name)))))
+  (elt row (position column-name field-names-and-types :test 'string= :key 'car)))
 
 (defun force-kill ()
   "Internal convenience function to clean up connections"
