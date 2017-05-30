@@ -70,7 +70,7 @@
 
 (define-foreign-library libmysqlclient
   (:darwin (:or "libmysqlclient.20.dylib" "libmysqlclient.dylib"))
-  ((:not :windows) (:default "libmysqlclient_r"))
+  ((:not :windows) (:default "libmysqlclient"))
   (:windows (:default "libmysql")))
 
 (use-foreign-library libmysqlclient)
