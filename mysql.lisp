@@ -360,12 +360,12 @@
   (declare (optimize (speed 3) (safety 3))
 	   (type (integer 0 65536) num-fields))
   (let* ((mysql-lens (mysql-fetch-lengths mysql-res))
-         (int-size (foreign-type-size :long)))
+         (int-size (foreign-type-size :pointer)))
     (declare (type (integer 0 16) int-size))
     (loop for i of-type fixnum from 0 to (* num-fields int-size) by int-size
        for f of-type list in field-names-and-types
        collect (extract-field row i
-			      (mem-ref mysql-lens :unsigned-long i) type-map f))))
+			      (mem-ref mysql-lens :unsigned-long (/ i int-size)) type-map f))))
 
 
 
