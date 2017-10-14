@@ -112,7 +112,7 @@
       (unless (or (zerop y)
                   (zerop m)
                   (zerop d))
-        (encode-universal-time 0 0 0 d m y 0)))))
+        (encode-universal-time 0 0 0 d m y)))))
 
 (defun string-to-seconds (string &optional len)
   "Fairly ugly function to turn MySQL TIME duration into an integer representation.
